@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 env:
-  TF_WORKING_DIR: environments/dev
+  TF_WORKING_DIR: terraform/environments/dev
 
 jobs:
   terraform:

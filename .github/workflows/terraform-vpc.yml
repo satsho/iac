@@ -4,12 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "plan or apply"
+        description: "plan, apply, or destroy"
         required: true
         type: choice
         options:
           - plan
           - apply
+          - destroy
 
 permissions:
   id-token: write
@@ -22,7 +23,7 @@ jobs:
   terraform:
     runs-on: ubuntu-latest
     environment: AWS
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,9 +45,14 @@ jobs:
 
       - name: Terraform Plan
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: terraform plan -out=tfplan
+        run: |
+          if [ "${{ inputs.action }}" = "destroy" ]; then
+            terraform plan -destroy -out=tfplan
+          else
+            terraform plan -out=tfplan
+          fi
 
-      - name: Terraform Apply
-        if: ${{ inputs.action == 'apply' }}
+      - name: Terraform Apply / Destroy
+        if: ${{ inputs.action == 'apply' || inputs.action == 'destroy' }}
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform apply -auto-approve tfplan

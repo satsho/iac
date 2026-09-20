@@ -1,13 +1,12 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  Terraform state (satsho/iac) 用のS3バケットを作成するbootstrapスタック。
-  DynamoDBロックテーブルは使わない(Terraform 1.10+のS3ネイティブロックを使用)。
+  Terraform state (satsho/iac)  S3 bootstrap
 
 Parameters:
   BucketName:
     Type: String
     Default: satsho-iac-tfstate
-    Description: tfstateを保存するS3バケット名(グローバルで一意である必要あり)
+    Description: tfstate s3 buckert name
 
 Resources:
   TerraformStateBucket:
@@ -49,8 +48,8 @@ Resources:
 
 Outputs:
   BucketName:
-    Description: environments/dev/backend.tf の bucket に設定する値
+    Description: environments/dev/backend.tf bucket
     Value: !Ref TerraformStateBucket
   BucketArn:
-    Description: iam/terraform-permissions-policy.json の Resource 確認用
+    Description: iam/terraform-permissions-policy.json Resource
     Value: !GetAtt TerraformStateBucket.Arn

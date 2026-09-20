@@ -1,0 +1,56 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Terraform state (satsho/iac) 用のS3バケットを作成するbootstrapスタック。
+  DynamoDBロックテーブルは使わない(Terraform 1.10+のS3ネイティブロックを使用)。
+
+Parameters:
+  BucketName:
+    Type: String
+    Default: satsho-iac-tfstate
+    Description: tfstateを保存するS3バケット名(グローバルで一意である必要あり)
+
+Resources:
+  TerraformStateBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Ref BucketName
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+            BucketKeyEnabled: true
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  TerraformStateBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref TerraformStateBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt TerraformStateBucket.Arn
+              - !Sub '${TerraformStateBucket.Arn}/*'
+            Condition:
+              Bool:
+                'aws:SecureTransport': 'false'
+
+Outputs:
+  BucketName:
+    Description: environments/dev/backend.tf の bucket に設定する値
+    Value: !Ref TerraformStateBucket
+  BucketArn:
+    Description: iam/terraform-permissions-policy.json の Resource 確認用
+    Value: !GetAtt TerraformStateBucket.Arn

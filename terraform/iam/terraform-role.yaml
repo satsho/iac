@@ -1,0 +1,124 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  GitHub Actions (OIDC) が Terraform 実行時にAssumeするIAMロール。
+  信頼ポリシーは指定ブランチからの実行のみ許可し、
+  権限ポリシーはVPC操作+tfstate用S3バケットへのアクセスのみに限定する。
+
+Parameters:
+  RoleName:
+    Type: String
+    Default: github-actions-terraform
+
+  OIDCProviderArn:
+    Type: String
+    Default: arn:aws:iam::563613886922:oidc-provider/token.actions.githubusercontent.com
+    Description: すでに作成済みのGitHub Actions用OIDCプロバイダーのARN
+
+  GitHubOwner:
+    Type: String
+    Default: satsho
+
+  GitHubOwnerId:
+    Type: String
+    Default: '15127328'
+    Description: 不変サブジェクト形式で使われるowner_id(sub claimから取得済みの値)
+
+  GitHubRepo:
+    Type: String
+    Default: iac
+
+  GitHubRepoId:
+    Type: String
+    Default: '1371692263'
+    Description: 不変サブジェクト形式で使われるrepo_id(sub claimから取得済みの値)
+
+  GitHubBranch:
+    Type: String
+    Default: main
+    Description: apply権限を許可するブランチ
+
+  TFStateBucketName:
+    Type: String
+    Default: satsho-iac-tfstate
+    Description: bootstrap.yaml で作成したtfstate用S3バケット名
+
+  AwsRegion:
+    Type: String
+    Default: ap-northeast-1
+
+Resources:
+  TerraformRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RoleName
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref OIDCProviderArn
+            Action:
+              - sts:AssumeRoleWithWebIdentity
+              - sts:TagSession
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub 'repo:${GitHubOwner}@${GitHubOwnerId}/${GitHubRepo}@${GitHubRepoId}:ref:refs/heads/${GitHubBranch}'
+      Policies:
+        - PolicyName: terraform-vpc-permissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: VpcNetworkingManage
+                Effect: Allow
+                Action:
+                  - ec2:CreateVpc
+                  - ec2:DeleteVpc
+                  - ec2:ModifyVpcAttribute
+                  - ec2:CreateSubnet
+                  - ec2:DeleteSubnet
+                  - ec2:ModifySubnetAttribute
+                  - ec2:CreateInternetGateway
+                  - ec2:DeleteInternetGateway
+                  - ec2:AttachInternetGateway
+                  - ec2:DetachInternetGateway
+                  - ec2:CreateRouteTable
+                  - ec2:DeleteRouteTable
+                  - ec2:CreateRoute
+                  - ec2:DeleteRoute
+                  - ec2:AssociateRouteTable
+                  - ec2:DisassociateRouteTable
+                  - ec2:CreateTags
+                  - ec2:DeleteTags
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref AwsRegion
+              - Sid: VpcNetworkingRead
+                Effect: Allow
+                Action:
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeVpcAttribute
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeInternetGateways
+                  - ec2:DescribeRouteTables
+                  - ec2:DescribeTags
+                  - ec2:DescribeAvailabilityZones
+                Resource: '*'
+              - Sid: TerraformStateS3
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub 'arn:aws:s3:::${TFStateBucketName}/dev/*'
+              - Sid: TerraformStateS3List
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub 'arn:aws:s3:::${TFStateBucketName}'
+
+Outputs:
+  RoleArn:
+    Description: GitHub VariablesのAWS_ROLE_ARNに設定する値
+    Value: !GetAtt TerraformRole.Arn

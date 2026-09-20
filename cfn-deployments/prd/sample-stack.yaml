@@ -1,0 +1,3 @@
+template-file-path: cfn-templates/sample.yaml
+parameters:
+  Environment: prd

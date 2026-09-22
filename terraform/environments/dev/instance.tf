@@ -59,7 +59,7 @@ resource "aws_instance" "test" {
   instance_type          = "t2.micro"
   subnet_id              = values(module.vpc.public_subnet_ids)[0]
   vpc_security_group_ids = [aws_security_group.instance.id]
-  iam_instance_profile    = aws_iam_instance_profile.instance.name
+  iam_instance_profile   = aws_iam_instance_profile.instance.name
 
   tags = {
     Name = "${var.project_name}-test-instance"

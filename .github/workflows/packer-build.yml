@@ -1,0 +1,33 @@
+name: Packer Build AMI
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: AWS
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: hashicorp/setup-packer@main
+        with:
+          version: "1.11.2"
+
+      - name: Packer Init
+        working-directory: packer
+        run: packer init al2023-nginx.pkr.hcl
+
+      - name: Packer Build
+        working-directory: packer
+        run: packer build al2023-nginx.pkr.hcl

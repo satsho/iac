@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
   GitHub Actions (OIDC) が Terraform 実行時にAssumeするIAMロール。
-  信頼ポリシーは指定ブランチからの実行のみ許可し、
+  信頼ポリシーは指定Environment(ジョブに environment: を指定した実行)からの実行のみ許可し、
   権限ポリシーはVPC操作+tfstate用S3バケットへのアクセスのみに限定する。
 
 Parameters:
@@ -32,10 +32,10 @@ Parameters:
     Default: '1371692263'
     Description: 不変サブジェクト形式で使われるrepo_id(sub claimから取得済みの値)
 
-  GitHubBranch:
+  GitHubEnvironment:
     Type: String
-    Default: main
-    Description: apply権限を許可するブランチ
+    Default: AWS
+    Description: apply権限を許可するGitHub Actions Environment名(ジョブがenvironmentを指定する場合、subはref基準ではなくenvironment基準になる)
 
   TFStateBucketName:
     Type: String
@@ -64,48 +64,20 @@ Resources:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
               StringLike:
-                token.actions.githubusercontent.com:sub: !Sub 'repo:${GitHubOwner}@${GitHubOwnerId}/${GitHubRepo}@${GitHubRepoId}:ref:refs/heads/${GitHubBranch}'
+                token.actions.githubusercontent.com:sub: !Sub 'repo:${GitHubOwner}@${GitHubOwnerId}/${GitHubRepo}@${GitHubRepoId}:environment:${GitHubEnvironment}'
       Policies:
         - PolicyName: terraform-vpc-permissions
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              - Sid: VpcNetworkingManage
+              - Sid: Ec2Broad
                 Effect: Allow
                 Action:
-                  - ec2:CreateVpc
-                  - ec2:DeleteVpc
-                  - ec2:ModifyVpcAttribute
-                  - ec2:CreateSubnet
-                  - ec2:DeleteSubnet
-                  - ec2:ModifySubnetAttribute
-                  - ec2:CreateInternetGateway
-                  - ec2:DeleteInternetGateway
-                  - ec2:AttachInternetGateway
-                  - ec2:DetachInternetGateway
-                  - ec2:CreateRouteTable
-                  - ec2:DeleteRouteTable
-                  - ec2:CreateRoute
-                  - ec2:DeleteRoute
-                  - ec2:AssociateRouteTable
-                  - ec2:DisassociateRouteTable
-                  - ec2:CreateTags
-                  - ec2:DeleteTags
+                  - ec2:*
                 Resource: '*'
                 Condition:
                   StringEquals:
                     aws:RequestedRegion: !Ref AwsRegion
-              - Sid: VpcNetworkingRead
-                Effect: Allow
-                Action:
-                  - ec2:DescribeVpcs
-                  - ec2:DescribeVpcAttribute
-                  - ec2:DescribeSubnets
-                  - ec2:DescribeInternetGateways
-                  - ec2:DescribeRouteTables
-                  - ec2:DescribeTags
-                  - ec2:DescribeAvailabilityZones
-                Resource: '*'
               - Sid: TerraformStateS3
                 Effect: Allow
                 Action:
@@ -117,6 +89,34 @@ Resources:
                 Effect: Allow
                 Action: s3:ListBucket
                 Resource: !Sub 'arn:aws:s3:::${TFStateBucketName}'
+              - Sid: InstanceIamManage
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:GetRole
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:CreateInstanceProfile
+                  - iam:DeleteInstanceProfile
+                  - iam:GetInstanceProfile
+                  - iam:AddRoleToInstanceProfile
+                  - iam:RemoveRoleFromInstanceProfile
+                  - iam:TagInstanceProfile
+                Resource:
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/iac-poc-*'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:instance-profile/iac-poc-*'
+              - Sid: InstancePassRole
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/iac-poc-*'
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: ec2.amazonaws.com
 
 Outputs:
   RoleArn:

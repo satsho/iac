@@ -18,6 +18,8 @@ permissions:
 
 env:
   TF_WORKING_DIR: terraform/environments/dev
+  TF_VAR_rhel_org_id: ${{ secrets.RHEL_ORG_ID }}
+  TF_VAR_rhel_activation_key: ${{ secrets.RHEL_ACTIVATION_KEY }}
 
 jobs:
   terraform:

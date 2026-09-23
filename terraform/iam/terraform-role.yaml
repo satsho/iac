@@ -1,8 +1,9 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  GitHub Actions (OIDC) が Terraform 実行時にAssumeするIAMロール。
-  信頼ポリシーは指定Environment(ジョブに environment: を指定した実行)からの実行のみ許可し、
-  権限ポリシーはVPC操作+tfstate用S3バケットへのアクセスのみに限定する。
+  IAM role that GitHub Actions (OIDC) assumes when running Terraform.
+  The trust policy allows execution only from the specified Environment
+  (a job that sets environment:), and the permission policy is limited to
+  VPC operations plus access to the tfstate S3 bucket.
 
 Parameters:
   RoleName:
@@ -12,7 +13,7 @@ Parameters:
   OIDCProviderArn:
     Type: String
     Default: arn:aws:iam::563613886922:oidc-provider/token.actions.githubusercontent.com
-    Description: すでに作成済みのGitHub Actions用OIDCプロバイダーのARN
+    Description: ARN of the already-created OIDC provider for GitHub Actions
 
   GitHubOwner:
     Type: String
@@ -21,7 +22,7 @@ Parameters:
   GitHubOwnerId:
     Type: String
     Default: '15127328'
-    Description: 不変サブジェクト形式で使われるowner_id(sub claimから取得済みの値)
+    Description: owner_id used in the immutable subject format (already obtained from the sub claim)
 
   GitHubRepo:
     Type: String
@@ -30,17 +31,17 @@ Parameters:
   GitHubRepoId:
     Type: String
     Default: '1371692263'
-    Description: 不変サブジェクト形式で使われるrepo_id(sub claimから取得済みの値)
+    Description: repo_id used in the immutable subject format (already obtained from the sub claim)
 
   GitHubEnvironment:
     Type: String
     Default: AWS
-    Description: apply権限を許可するGitHub Actions Environment名(ジョブがenvironmentを指定する場合、subはref基準ではなくenvironment基準になる)
+    Description: Name of the GitHub Actions Environment allowed to apply (when a job sets environment:, the sub claim is based on the environment instead of the ref)
 
   TFStateBucketName:
     Type: String
     Default: satsho-iac-tfstate
-    Description: bootstrap.yaml で作成したtfstate用S3バケット名
+    Description: S3 bucket name for tfstate, created by bootstrap.yaml
 
   AwsRegion:
     Type: String
@@ -99,14 +100,17 @@ Resources:
                   - iam:UntagRole
                   - iam:PutRolePolicy
                   - iam:DeleteRolePolicy
+                  - iam:ListRolePolicies
                   - iam:AttachRolePolicy
                   - iam:DetachRolePolicy
+                  - iam:ListAttachedRolePolicies
                   - iam:CreateInstanceProfile
                   - iam:DeleteInstanceProfile
                   - iam:GetInstanceProfile
                   - iam:AddRoleToInstanceProfile
                   - iam:RemoveRoleFromInstanceProfile
                   - iam:TagInstanceProfile
+                  - iam:ListInstanceProfilesForRole
                 Resource:
                   - !Sub 'arn:aws:iam::${AWS::AccountId}:role/iac-poc-*'
                   - !Sub 'arn:aws:iam::${AWS::AccountId}:instance-profile/iac-poc-*'
@@ -117,8 +121,44 @@ Resources:
                 Condition:
                   StringEquals:
                     iam:PassedToService: ec2.amazonaws.com
+              - Sid: CfnRoleStackManage
+                Effect: Allow
+                Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:UpdateStack
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:GetTemplate
+                  - cloudformation:GetTemplateSummary
+                  - cloudformation:ListStackResources
+                Resource:
+                  - !Sub 'arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/iac-terraform-role/*'
+              # このスタックはCI自身(RoleName)の権限を定義しているため、
+              # ここだけは iac-poc-* ではなく RoleName を名指しで許可する
+              # (自己書き換えの範囲を「このロール1つ」に限定するため)
+              - Sid: SelfRoleManage
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:GetRole
+                  - iam:UpdateRole
+                  - iam:UpdateAssumeRolePolicy
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:PutRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                Resource:
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${RoleName}'
 
 Outputs:
   RoleArn:
-    Description: GitHub VariablesのAWS_ROLE_ARNに設定する値
+    Description: Value to set as AWS_ROLE_ARN in GitHub Variables
     Value: !GetAtt TerraformRole.Arn

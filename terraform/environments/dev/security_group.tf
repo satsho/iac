@@ -1,6 +1,6 @@
 resource "aws_security_group" "instance" {
   name        = "${var.project_name}-instance-sg"
-  description = "SSM経由のみでアクセスする試験用インスタンス(インバウンドなし)"
+  description = "Trial instance, SSM access only (no inbound rules)"
   vpc_id      = module.network.vpc_id
 
   egress {

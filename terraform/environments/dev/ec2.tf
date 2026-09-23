@@ -1,40 +1,10 @@
-# RHEL 9 の公式AMI(Red Hat所有)を検索する。
-# 注意: "-Access2-"(BYOS/Cloud Access版)と"-Hourly2-"(AWS Marketplace従量課金版、
-# サブスク登録不要でRHEL利用料がEC2料金に含まれる)が混在してヒットし得るため、
-# terraform plan で解決されたAMI名を必ず確認し、Access2版になっているかチェックすること。
-# Hourly2版を掴んでいた場合はfilterのvaluesに"*Access2*"を追加して絞り込む。
-data "aws_ami" "rhel" {
-  most_recent = true
-  owners      = ["309956199834"] # Red Hat公式
-
-  filter {
-    name   = "name"
-    values = ["RHEL-9*x86_64*"]
-  }
-
-  filter {
-    name   = "architecture"
-    values = ["x86_64"]
-  }
-
-  filter {
-    name   = "root-device-type"
-    values = ["ebs"]
-  }
-
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
-}
-
 moved {
   from = aws_instance.test
   to   = aws_instance.rke2
 }
 
 resource "aws_instance" "rke2" {
-  ami                    = data.aws_ami.rhel.id
+  ami                    = var.rhel_ami_id
   instance_type          = var.rke2_instance_type
   subnet_id              = values(module.network.public_subnet_ids)[0]
   vpc_security_group_ids = [aws_security_group.instance.id]
@@ -53,6 +23,7 @@ resource "aws_instance" "rke2" {
   }
 
   user_data = templatefile("${path.module}/templates/rke2-user-data.sh.tpl", {
+    aws_region          = var.aws_region
     rhel_org_id         = var.rhel_org_id
     rhel_activation_key = var.rhel_activation_key
   })

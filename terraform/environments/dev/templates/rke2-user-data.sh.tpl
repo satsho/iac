@@ -1,6 +1,12 @@
 #!/bin/bash
 set -euxo pipefail
 
+# RHELの公式AMIにはamazon-ssm-agentが同梱されていないため、最初に入れる。
+# (IAMロールにはAmazonSSMManagedInstanceCoreが既にアタッチ済み)
+dnf install -y "https://s3.${aws_region}.amazonaws.com/amazon-ssm-${aws_region}/latest/linux_amd64/amazon-ssm-agent.rpm"
+systemctl enable amazon-ssm-agent
+systemctl start amazon-ssm-agent
+
 subscription-manager register \
   --org="${rhel_org_id}" \
   --activationkey="${rhel_activation_key}" \

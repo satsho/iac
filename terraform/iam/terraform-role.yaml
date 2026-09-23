@@ -2,8 +2,9 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: >
   IAM role that GitHub Actions (OIDC) assumes when running Terraform.
   The trust policy allows execution only from the specified Environment
-  (a job that sets environment:), and the permission policy is limited to
-  VPC operations plus access to the tfstate S3 bucket.
+  (a job that sets environment:). This is a trial/learning environment,
+  so the permission policy is intentionally broad for EC2, IAM and
+  CloudFormation; only the tfstate S3 bucket access stays scoped.
 
 Parameters:
   RoleName:
@@ -90,73 +91,20 @@ Resources:
                 Effect: Allow
                 Action: s3:ListBucket
                 Resource: !Sub 'arn:aws:s3:::${TFStateBucketName}'
-              - Sid: InstanceIamManage
+              # トライアル段階のため、IAM/CloudFormationはリソース種別単位で
+              # 広く許可する(iac-poc-*やロール名限定での個別許可は、必要な
+              # アクションを一つずつ後から足す往復が多く非効率だったため撤廃)。
+              # S3(tfstate)だけは元々バケット限定で困っていないため維持。
+              - Sid: IamBroad
                 Effect: Allow
                 Action:
-                  - iam:CreateRole
-                  - iam:DeleteRole
-                  - iam:GetRole
-                  - iam:TagRole
-                  - iam:UntagRole
-                  - iam:PutRolePolicy
-                  - iam:DeleteRolePolicy
-                  - iam:ListRolePolicies
-                  - iam:AttachRolePolicy
-                  - iam:DetachRolePolicy
-                  - iam:ListAttachedRolePolicies
-                  - iam:CreateInstanceProfile
-                  - iam:DeleteInstanceProfile
-                  - iam:GetInstanceProfile
-                  - iam:AddRoleToInstanceProfile
-                  - iam:RemoveRoleFromInstanceProfile
-                  - iam:TagInstanceProfile
-                  - iam:ListInstanceProfilesForRole
-                Resource:
-                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/iac-poc-*'
-                  - !Sub 'arn:aws:iam::${AWS::AccountId}:instance-profile/iac-poc-*'
-              - Sid: InstancePassRole
-                Effect: Allow
-                Action: iam:PassRole
-                Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/iac-poc-*'
-                Condition:
-                  StringEquals:
-                    iam:PassedToService: ec2.amazonaws.com
-              - Sid: CfnRoleStackManage
+                  - iam:*
+                Resource: '*'
+              - Sid: CloudFormationBroad
                 Effect: Allow
                 Action:
-                  - cloudformation:CreateStack
-                  - cloudformation:UpdateStack
-                  - cloudformation:DescribeStacks
-                  - cloudformation:DescribeStackEvents
-                  - cloudformation:DescribeStackResources
-                  - cloudformation:CreateChangeSet
-                  - cloudformation:DescribeChangeSet
-                  - cloudformation:ExecuteChangeSet
-                  - cloudformation:DeleteChangeSet
-                  - cloudformation:GetTemplate
-                  - cloudformation:GetTemplateSummary
-                  - cloudformation:ListStackResources
-                Resource:
-                  - !Sub 'arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/iac-terraform-role/*'
-              # このスタックはCI自身(RoleName)の権限を定義しているため、
-              # ここだけは iac-poc-* ではなく RoleName を名指しで許可する
-              # (自己書き換えの範囲を「このロール1つ」に限定するため)
-              - Sid: SelfRoleManage
-                Effect: Allow
-                Action:
-                  - iam:CreateRole
-                  - iam:GetRole
-                  - iam:UpdateRole
-                  - iam:UpdateAssumeRolePolicy
-                  - iam:TagRole
-                  - iam:UntagRole
-                  - iam:PutRolePolicy
-                  - iam:GetRolePolicy
-                  - iam:DeleteRolePolicy
-                  - iam:ListRolePolicies
-                  - iam:ListAttachedRolePolicies
-                Resource:
-                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${RoleName}'
+                  - cloudformation:*
+                Resource: '*'
 
 Outputs:
   RoleArn:

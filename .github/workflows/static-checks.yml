@@ -30,8 +30,8 @@ jobs:
       - name: Terraform fmt check
         run: terraform fmt -check -recursive -diff terraform
 
-      - name: Terraform validate (modules/vpc)
-        working-directory: terraform/modules/vpc
+      - name: Terraform validate (modules/network)
+        working-directory: terraform/modules/network
         run: |
           terraform init -backend=false -input=false
           terraform validate

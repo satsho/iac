@@ -12,9 +12,9 @@ iac/                          # リポジトリルート
 │   │   └── dev/              # 実際にVPCとインスタンスを作る環境。ここをterraform plan/applyする
 │   │       # state は1つ(環境ごとにまとめて作成・削除)だが、可読性のため
 │   │       # リソースドメインごとに.tfファイルを分割している:
-│   │       #   network.tf(VPCモジュール呼び出し) / security_group.tf / iam.tf / ec2.tf
+│   │       #   network.tf(networkモジュール呼び出し) / security_group.tf / iam.tf / ec2.tf
 │   ├── modules/
-│   │   └── vpc/              # VPC本体のモジュール(再利用可能な部品)
+│   │   └── network/          # VPC・サブネット・ルーティング一式のモジュール(再利用可能な部品)
 │   ├── iam/                  # IAMロール定義(CFNテンプレート)
 │   └── README.md             # このファイル
 ├── packer/                   # AMIビルド用Packerテンプレート

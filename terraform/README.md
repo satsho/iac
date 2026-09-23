@@ -105,6 +105,7 @@ aws cloudformation deploy \
 | `AWS_ROLE_ARN` | Step 2の出力値(`arn:aws:iam::563613886922:role/github-actions-terraform`) |
 | `AWS_REGION` | `ap-northeast-1` |
 | `TF_STATE_BUCKET` | Step 1の出力値 |
+| `RHEL_AMI_ID` | Step 6参照。RHEL 9のAMI ID(非機密なのでVariables側) |
 
 AWS認証自体はOIDCのためSecrets不要だが、RHELサブスク登録のために下記Secretsが必要
 (詳細はStep 6を参照)。
@@ -133,11 +134,20 @@ Secrets(Variablesと同じ画面のSecretsタブ)に以下を設定:
 
 ### Step 6: RHEL + RKE2ノードの起動
 
-`environments/dev/ec2.tf` は Red Hat公式のRHEL 9 AMI(BYOS/Cloud Access版、
-`Access2`)を検索して起動する設計。サブスク登録(`subscription-manager register`)と
-RKE2(シングルノード、server単体)のセットアップは、AMIに焼き込むのではなく
-**起動時のuser_data(cloud-init)** で行う。焼き込み方式だとAMIを複数インスタンスで
-使い回したときにサブスク登録が競合しやすいため。
+`environments/dev/ec2.tf` はRHEL 9のAMIを`var.rhel_ami_id`で受け取って起動する設計。
+当初はRed Hat公式所有者ID(`309956199834`)からの`data "aws_ami"`動的検索を
+試みたが、このAWSアカウント/リージョンでは該当AMIが見えず断念し、
+**AMI IDを直接変数で渡す方式**にしている。
+
+AMI IDの確認方法:
+1. EC2コンソールで「インスタンスを起動」画面を開く(起動はしない)
+2. 「アプリケーションおよびOSイメージ」→ Quick Startタブ → Red Hatを選択、
+   RHEL 9系のバージョンを選ぶ
+3. 表示されたAMI ID(`ami-...`)をコピーし、Step 3の`RHEL_AMI_ID`変数に設定
+
+サブスク登録(`subscription-manager register`)とRKE2(シングルノード、server単体)の
+セットアップは、AMIに焼き込むのではなく**起動時のuser_data(cloud-init)** で行う。
+焼き込み方式だとAMIを複数インスタンスで使い回したときにサブスク登録が競合しやすいため。
 
 事前にStep 3で `RHEL_ORG_ID` / `RHEL_ACTIVATION_KEY` のSecretsを設定しておくこと。
 これらはCIワークフロー側で `TF_VAR_rhel_org_id` / `TF_VAR_rhel_activation_key` として

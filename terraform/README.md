@@ -179,6 +179,98 @@ sudo /var/lib/rancher/rke2/bin/kubectl \
 - `packer/al2023-nginx.pkr.hcl` / `packer-build.yml` はAmazon Linux 2023 + nginxの
   検証用AMIを作る別系統のパイプラインで、このRHEL+RKE2インスタンスとは独立している。
 
+## CloudFormation Git Sync(`iac-terraform-role` スタックの自動反映)
+
+Step 2のIAMロール(`iac-terraform-role`スタック)は、権限不足エラーが出るたびに
+`terraform-role.yaml`を直して再デプロイする、を何度も繰り返す運用になっていた。
+都度ローカル/コンソールで`aws cloudformation deploy`を打つのが面倒なため、
+`main`へのpushで自動反映される仕組みを2つ用意した。
+
+- `.github/workflows/cfn-role-deploy.yml`:
+  `main`への push で `aws cloudformation deploy` を実行するGitHub Actions
+- AWS CloudFormation純正の **Git sync** 機能(コンソールの「Git と同期」タブ):
+  CodeConnections経由でCloudFormationサービス自身がGitHubを監視し、直接スタックを更新する
+
+どちらか一方でも良いが、Git syncのセットアップでいくつも躓いたので、
+再現できるように手順と原因を残しておく。
+
+### つまずいたポイント
+
+#### 1. 「デプロイファイル」とテンプレートファイルは別物
+
+Git Syncの「デプロイファイルのパス」に、いきなり既存のCFNテンプレート
+(`terraform-role.yaml`)のパスを指定すると失敗する。
+
+```
+Error: Unable to read CloudFormation Deployment Config File
+```
+
+Git Syncが読むのは、テンプレートとは別スキーマの「デプロイファイル」という
+YAMLで、最小構成は以下(`template-file-path`/`parameters`/`tags`の3キー):
+
+```yaml
+# terraform/iam/deployment-terraform-role.yaml
+template-file-path: terraform/iam/terraform-role.yaml
+parameters: {}
+tags: {}
+```
+
+このファイル自体をリポジトリに事前にコミットしておく必要がある。
+**「スタックの作成」ウィザードから新規作成する場合はAWSが自動でこのファイルの
+プルリクエストを作ってくれるが、既存スタックへの後付け接続(「Git と同期」
+タブの「接続」ボタン)ではPRは飛んでこず、指定パスに実ファイルが無いと
+`404 Resource not found`になる。**
+
+#### 2. ブランチの取り違え
+
+Git Sync(および`cfn-role-deploy.yml`)は`main`ブランチを監視する設定に
+していたが、実際の作業はfeatureブランチ上で進めていて`main`へのマージを
+忘れていた。デプロイファイルをコミットしても`main`に無ければ同じ404になる。
+→ 作業ブランチをPRで`main`にマージして解消。
+
+#### 3. CI用ロール自身の権限不足(鶏と卵)
+
+`cfn-role-deploy.yml`実行時にこのエラーが出た。
+
+```
+AccessDenied: ... is not authorized to perform: cloudformation:DescribeStacks
+```
+
+`github-actions-terraform`ロールの権限を「IAM/CloudFormationを広く許可する」
+ように直したが、**その変更を反映させる行為自体を、まだ広い権限を持って
+いないロールでは実行できない**という堂々巡りになった。
+→ ここだけはCLIまたはAWSコンソールから**手動で一度だけ**`aws cloudformation
+deploy`(またはコンソールでの「スタックを更新」)を実行し、広い権限を先に
+反映させることで解消。以降は自動デプロイが機能するようになる。
+
+#### 4. 副作用: 手動更新するとGit Syncが一時停止する
+
+上記3の手動更新を行った直後、Git Syncが自動的に「無効」になった。
+
+```
+デプロイファイルの外部でスタックに変更が加えられたため、Git sync は無効になっています。
+```
+
+これはGit Sync管理外での変更を検知した安全装置。「Git と同期」タブの
+「有効にする」を押せば、現在のデプロイファイルの内容で再同期され、実害なく
+復旧する(`STACK_ALREADY_IN_SYNC`になれば成功)。
+
+### 最終的な手順(再現用)
+
+1. デプロイファイル(`deployment-terraform-role.yaml`)をテンプレートと同じ
+   ディレクトリに作成してコミット
+2. 作業ブランチを`main`にマージ
+3. CloudFormationコンソール → 対象スタック → 「Git と同期」タブ → 「接続」
+   - リポジトリ・ブランチ(`main`)・デプロイファイルのパスを指定
+   - 「スタックの権限を指定」で使うIAMロール
+     (`cloudformation.amazonaws.com`を信頼するロール)を新規作成し、
+     実際にリソースを作成・更新できる権限を付与する
+4. 初回反映で権限不足エラーが出た場合、**その権限を追加する変更だけは
+   手動で一度デプロイ**(CLIまたはコンソールの「スタックを更新」)
+5. 手動更新後にGit Syncが「無効」になっていたら「有効にする」を押して復旧
+6. 以降は対象ファイル(テンプレート・デプロイファイルとも)を`main`にpush
+   するだけで自動反映される
+
 ## 変数・Secretsの設計方針
 
 | 種類 | 置き場所 | 例 |

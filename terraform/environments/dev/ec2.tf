@@ -22,47 +22,6 @@ data "aws_ami" "rhel" {
   }
 }
 
-resource "aws_security_group" "instance" {
-  name        = "${var.project_name}-instance-sg"
-  description = "SSM経由のみでアクセスする試験用インスタンス(インバウンドなし)"
-  vpc_id      = module.vpc.vpc_id
-
-  egress {
-    description = "All outbound"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = {
-    Name = "${var.project_name}-instance-sg"
-  }
-}
-
-resource "aws_iam_role" "instance" {
-  name = "iac-poc-instance-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "ec2.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "ssm" {
-  role       = aws_iam_role.instance.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-}
-
-resource "aws_iam_instance_profile" "instance" {
-  name = "iac-poc-instance-profile"
-  role = aws_iam_role.instance.name
-}
-
 moved {
   from = aws_instance.test
   to   = aws_instance.rke2

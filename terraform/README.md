@@ -10,6 +10,9 @@ iac/                          # リポジトリルート
 │   ├── bootstrap/            # tfstate用のS3を作る「最初の一回だけ」用のCFNテンプレート
 │   ├── environments/
 │   │   └── dev/              # 実際にVPCとインスタンスを作る環境。ここをterraform plan/applyする
+│   │       # state は1つ(環境ごとにまとめて作成・削除)だが、可読性のため
+│   │       # リソースドメインごとに.tfファイルを分割している:
+│   │       #   network.tf(VPCモジュール呼び出し) / security_group.tf / iam.tf / ec2.tf
 │   ├── modules/
 │   │   └── vpc/              # VPC本体のモジュール(再利用可能な部品)
 │   ├── iam/                  # IAMロール定義(CFNテンプレート)
@@ -130,7 +133,7 @@ Secrets(Variablesと同じ画面のSecretsタブ)に以下を設定:
 
 ### Step 6: RHEL + RKE2ノードの起動
 
-`environments/dev/instance.tf` は Red Hat公式のRHEL 9 AMI(BYOS/Cloud Access版、
+`environments/dev/ec2.tf` は Red Hat公式のRHEL 9 AMI(BYOS/Cloud Access版、
 `Access2`)を検索して起動する設計。サブスク登録(`subscription-manager register`)と
 RKE2(シングルノード、server単体)のセットアップは、AMIに焼き込むのではなく
 **起動時のuser_data(cloud-init)** で行う。焼き込み方式だとAMIを複数インスタンスで

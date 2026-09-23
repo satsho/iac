@@ -20,9 +20,9 @@ resource "aws_subnet" "public" {
   for_each = var.public_subnet_cidrs
 
   vpc_id                  = aws_vpc.this.id
-  cidr_block               = each.value
-  availability_zone        = each.key
-  map_public_ip_on_launch  = true
+  cidr_block              = each.value
+  availability_zone       = each.key
+  map_public_ip_on_launch = true
 
   tags = merge(var.tags, {
     Name = "${var.project_name}-public-${each.key}"
@@ -40,7 +40,7 @@ resource "aws_route_table" "public" {
 resource "aws_route" "public_internet_access" {
   route_table_id         = aws_route_table.public.id
   destination_cidr_block = "0.0.0.0/0"
-  gateway_id              = aws_internet_gateway.this.id
+  gateway_id             = aws_internet_gateway.this.id
 }
 
 resource "aws_route_table_association" "public" {

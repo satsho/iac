@@ -10,6 +10,9 @@ iac/                          # リポジトリルート
 │   ├── bootstrap/            # tfstate用のS3を作る「最初の一回だけ」用のCFNテンプレート
 │   ├── environments/
 │   │   └── dev/              # 実際にVPCとインスタンスを作る環境。ここをterraform plan/applyする
+│   │       # state は1つ(環境ごとにまとめて作成・削除)だが、可読性のため
+│   │       # リソースドメインごとに.tfファイルを分割している:
+│   │       #   network.tf(VPCモジュール呼び出し) / security_group.tf / iam.tf / ec2.tf
 │   ├── modules/
 │   │   └── vpc/              # VPC本体のモジュール(再利用可能な部品)
 │   ├── iam/                  # IAMロール定義(CFNテンプレート)
@@ -103,7 +106,16 @@ aws cloudformation deploy \
 | `AWS_REGION` | `ap-northeast-1` |
 | `TF_STATE_BUCKET` | Step 1の出力値 |
 
-Secretsは今回不要(OIDC認証のためAWSキー類が発生しない)。
+AWS認証自体はOIDCのためSecrets不要だが、RHELサブスク登録のために下記Secretsが必要
+(詳細はStep 6を参照)。
+
+リポジトリの Settings > Secrets and variables > Actions で、`AWS` Environmentの
+Secrets(Variablesと同じ画面のSecretsタブ)に以下を設定:
+
+| Secret名 | 値 |
+|---|---|
+| `RHEL_ORG_ID` | Red Hat Hybrid Cloud ConsoleのOrg ID |
+| `RHEL_ACTIVATION_KEY` | 同コンソールで発行したactivation key名 |
 
 ### Step 4: environments/dev/backend.tf にbootstrapの出力値を反映
 
@@ -119,17 +131,40 @@ Secretsは今回不要(OIDC認証のためAWSキー類が発生しない)。
 作成したVPC・インスタンス一式が削除される。applyと同じくplan結果を経由するので、
 実行前にログで削除対象を確認できる。
 
-### Step 6: (任意) Packerでカスタムイメージを作り、インスタンスを起動
+### Step 6: RHEL + RKE2ノードの起動
 
-`environments/dev/instance.tf` は `tag:Purpose=learning` かつ `iac-poc-al2023-*` という
-名前のAMIを検索して使う設計。まず `.github/workflows/packer-build.yml` を
-`workflow_dispatch` で実行してAMIを作ってから、Step 5のTerraform applyを実行する。
+`environments/dev/ec2.tf` は Red Hat公式のRHEL 9 AMI(BYOS/Cloud Access版、
+`Access2`)を検索して起動する設計。サブスク登録(`subscription-manager register`)と
+RKE2(シングルノード、server単体)のセットアップは、AMIに焼き込むのではなく
+**起動時のuser_data(cloud-init)** で行う。焼き込み方式だとAMIを複数インスタンスで
+使い回したときにサブスク登録が競合しやすいため。
 
-AMI作成後の接続確認はSSHキーを使わず、SSM Session Manager経由で行う。
+事前にStep 3で `RHEL_ORG_ID` / `RHEL_ACTIVATION_KEY` のSecretsを設定しておくこと。
+これらはCIワークフロー側で `TF_VAR_rhel_org_id` / `TF_VAR_rhel_activation_key` として
+Terraformに渡され、`templates/rke2-user-data.sh.tpl` に埋め込まれる。
+
+Step 5のTerraform applyを実行すると、RHELインスタンスが起動し初回起動時に
+自動でサブスク登録・RKE2インストール・起動まで完了する。
+
+**接続確認・動作確認**(SSHキーを使わず、SSM Session Manager経由):
 
 ```bash
 aws ssm start-session --target <instance-id>
+
+# インスタンス内で実行
+sudo systemctl status rke2-server
+sudo /var/lib/rancher/rke2/bin/kubectl \
+  --kubeconfig /etc/rancher/rke2/rke2.yaml get nodes
 ```
+
+**注意点**:
+- `user_data`の内容(activation key含む)はEC2のインスタンス属性とTerraform state
+  (S3、SSE暗号化済み)に平文で残る。完全な秘匿ではないので、activation keyが漏れた
+  場合はRed Hat Hybrid Cloud Console側で失効・再発行すること。
+- RKE2は`t2.micro`では非力なため、インスタンスタイプは`t3.medium`
+  (`var.rke2_instance_type`)に変更済み。コストが上がる点に注意。
+- `packer/al2023-nginx.pkr.hcl` / `packer-build.yml` はAmazon Linux 2023 + nginxの
+  検証用AMIを作る別系統のパイプラインで、このRHEL+RKE2インスタンスとは独立している。
 
 ## 変数・Secretsの設計方針
 
@@ -138,7 +173,7 @@ aws ssm start-session --target <instance-id>
 | 環境非依存の非機密設定 | `terraform.tfvars`(リポジトリにコミット) | `project_name` |
 | 環境ごとの設定 | `terraform/environments/<env>/terraform.tfvars` | VPC CIDR |
 | CI実行に必要な非機密値 | GitHub Variables | ロールARN、リージョン、tfstateバケット名 |
-| 本物の機密情報 | GitHub Secrets(今回は未使用) | 外部SaaSのAPIキーなど |
+| 本物の機密情報 | GitHub Secrets | RHELのorg ID・activation key |
 | AWS内で完結する機密 | AWS Secrets Manager / SSM SecureString | 将来のDBパスワード等 |
 
 ## IAM設計方針

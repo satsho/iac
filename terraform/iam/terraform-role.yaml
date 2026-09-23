@@ -100,14 +100,17 @@ Resources:
                   - iam:UntagRole
                   - iam:PutRolePolicy
                   - iam:DeleteRolePolicy
+                  - iam:ListRolePolicies
                   - iam:AttachRolePolicy
                   - iam:DetachRolePolicy
+                  - iam:ListAttachedRolePolicies
                   - iam:CreateInstanceProfile
                   - iam:DeleteInstanceProfile
                   - iam:GetInstanceProfile
                   - iam:AddRoleToInstanceProfile
                   - iam:RemoveRoleFromInstanceProfile
                   - iam:TagInstanceProfile
+                  - iam:ListInstanceProfilesForRole
                 Resource:
                   - !Sub 'arn:aws:iam::${AWS::AccountId}:role/iac-poc-*'
                   - !Sub 'arn:aws:iam::${AWS::AccountId}:instance-profile/iac-poc-*'

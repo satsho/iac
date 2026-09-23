@@ -23,6 +23,7 @@ resource "aws_instance" "rke2" {
   }
 
   user_data = templatefile("${path.module}/templates/rke2-user-data.sh.tpl", {
+    aws_region          = var.aws_region
     rhel_org_id         = var.rhel_org_id
     rhel_activation_key = var.rhel_activation_key
   })

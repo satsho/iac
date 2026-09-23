@@ -154,7 +154,10 @@ AMI IDの確認方法:
 Terraformに渡され、`templates/rke2-user-data.sh.tpl` に埋め込まれる。
 
 Step 5のTerraform applyを実行すると、RHELインスタンスが起動し初回起動時に
-自動でサブスク登録・RKE2インストール・起動まで完了する。
+自動でSSMエージェントのインストール・サブスク登録・RKE2インストール・起動まで
+完了する。RHELの公式AMIにはamazon-ssm-agentが同梱されていない(Amazon Linuxと
+異なる点)ため、user_dataの最初のステップとして明示的にインストールしている。
+これによりSSHキーやインバウンドルール無しでもSSM Session Managerが使える。
 
 **接続確認・動作確認**(SSHキーを使わず、SSM Session Manager経由):
 

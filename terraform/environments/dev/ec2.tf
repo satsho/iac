@@ -1,14 +1,15 @@
-# RHEL 9 の公式AMI(Red Hat所有、BYOS/Cloud Access版=Access2)を検索する。
-# 注意: AMI名のパターンはRed Hat側のリリースで変わることがあるため、
-# terraform plan で解決されたAMI名を確認し、Marketplace従量課金版(Hourly2)を
-# 誤って掴んでいないか確認すること。BYOSの場合サブスク登録はuser_data側で行う。
+# RHEL 9 の公式AMI(Red Hat所有)を検索する。
+# 注意: "-Access2-"(BYOS/Cloud Access版)と"-Hourly2-"(AWS Marketplace従量課金版、
+# サブスク登録不要でRHEL利用料がEC2料金に含まれる)が混在してヒットし得るため、
+# terraform plan で解決されたAMI名を必ず確認し、Access2版になっているかチェックすること。
+# Hourly2版を掴んでいた場合はfilterのvaluesに"*Access2*"を追加して絞り込む。
 data "aws_ami" "rhel" {
   most_recent = true
   owners      = ["309956199834"] # Red Hat公式
 
   filter {
     name   = "name"
-    values = ["RHEL-9*_HVM-*-x86_64-*-Access2-GP3"]
+    values = ["RHEL-9*x86_64*"]
   }
 
   filter {
@@ -20,6 +21,11 @@ data "aws_ami" "rhel" {
     name   = "root-device-type"
     values = ["ebs"]
   }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
 }
 
 moved {
@@ -30,7 +36,7 @@ moved {
 resource "aws_instance" "rke2" {
   ami                    = data.aws_ami.rhel.id
   instance_type          = var.rke2_instance_type
-  subnet_id              = values(module.vpc.public_subnet_ids)[0]
+  subnet_id              = values(module.network.public_subnet_ids)[0]
   vpc_security_group_ids = [aws_security_group.instance.id]
   iam_instance_profile   = aws_iam_instance_profile.instance.name
   ebs_optimized          = true

@@ -1,0 +1,35 @@
+name: Deploy IAM Role Stack (CFN)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "terraform/iam/terraform-role.yaml"
+      - ".github/workflows/cfn-role-deploy.yml"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: AWS
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Deploy terraform-role.yaml
+        run: |
+          aws cloudformation deploy \
+            --template-file terraform/iam/terraform-role.yaml \
+            --stack-name iac-terraform-role \
+            --capabilities CAPABILITY_NAMED_IAM

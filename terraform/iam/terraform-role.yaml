@@ -121,6 +121,42 @@ Resources:
                 Condition:
                   StringEquals:
                     iam:PassedToService: ec2.amazonaws.com
+              - Sid: CfnRoleStackManage
+                Effect: Allow
+                Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:UpdateStack
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:GetTemplate
+                  - cloudformation:GetTemplateSummary
+                  - cloudformation:ListStackResources
+                Resource:
+                  - !Sub 'arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/iac-terraform-role/*'
+              # このスタックはCI自身(RoleName)の権限を定義しているため、
+              # ここだけは iac-poc-* ではなく RoleName を名指しで許可する
+              # (自己書き換えの範囲を「このロール1つ」に限定するため)
+              - Sid: SelfRoleManage
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:GetRole
+                  - iam:UpdateRole
+                  - iam:UpdateAssumeRolePolicy
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:PutRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                Resource:
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${RoleName}'
 
 Outputs:
   RoleArn:

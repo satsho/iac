@@ -68,7 +68,7 @@ Resources:
               StringLike:
                 token.actions.githubusercontent.com:sub: !Sub 'repo:${GitHubOwner}@${GitHubOwnerId}/${GitHubRepo}@${GitHubRepoId}:environment:${GitHubEnvironment}'
       Policies:
-        - PolicyName: terraform-vpc-permissions
+        - PolicyName: terraform-infra-permissions
           PolicyDocument:
             Version: '2012-10-17'
             Statement:

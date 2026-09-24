@@ -1,6 +1,7 @@
-# satsho/iac — Terraform VPC PoC
+# satsho/iac — Terraform Infra PoC
 
-GitHub Actions (OIDC) から Terraform で VPC を作成するトライアル構成。
+GitHub Actions (OIDC) から Terraform でVPC・EC2・ALB等のインフラ一式を
+作成するトライアル構成。
 
 ## ディレクトリ構成
 
@@ -126,7 +127,7 @@ Secrets(Variablesと同じ画面のSecretsタブ)に以下を設定:
 
 ### Step 5: GitHub Actionsでplan/apply/destroyを実行
 
-`.github/workflows/terraform-vpc.yml` を使って、`workflow_dispatch` で手動実行。
+`.github/workflows/terraform-infra.yml` を使って、`workflow_dispatch` で手動実行。
 `action`入力で `plan` / `apply` / `destroy` を選べる。
 このワークフローは `terraform/environments/dev` を作業ディレクトリとして動く。
 
@@ -243,7 +244,7 @@ import {
 **ライフサイクルが根本的に違う**(destroyされたくない、devとは無関係に
 存続してほしい)ため、`environments/dns`という別ディレクトリ・別state
 (`dns/terraform.tfstate`)に分離している。実行も専用ワークフロー
-`.github/workflows/terraform-dns.yml`(`terraform-vpc.yml`と同じ構造、
+`.github/workflows/terraform-dns.yml`(`terraform-infra.yml`と同じ構造、
 working-directoryだけ`environments/dns`)を使う。
 
 手順:

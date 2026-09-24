@@ -112,6 +112,11 @@ Resources:
                 Action:
                   - route53:*
                 Resource: '*'
+              - Sid: ElasticLoadBalancingBroad
+                Effect: Allow
+                Action:
+                  - elasticloadbalancing:*
+                Resource: '*'
 
 Outputs:
   RoleArn:

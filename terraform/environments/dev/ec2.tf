@@ -1,9 +1,4 @@
 moved {
-  from = aws_instance.test
-  to   = aws_instance.k3s
-}
-
-moved {
   from = aws_instance.rke2
   to   = aws_instance.k3s
 }

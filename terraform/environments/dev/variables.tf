@@ -39,7 +39,7 @@ variable "web_node_port" {
 
 variable "rhel_ami_id" {
   description = <<-EOT
-    RHEL 9のAMI ID。EC2コンソールの「インスタンスを起動」画面 → Quick Startタブ →
+    RHEL 10.2のAMI ID。EC2コンソールの「インスタンスを起動」画面 → Quick Startタブ →
     Red Hatを選択して確認したAMI IDを指定する(data "aws_ami"での動的検索はこの
     AWSアカウント/リージョンでは公式所有者IDからAMIが見えなかったため断念した)。
     GitHub VariablesのRHEL_AMI_IDからTF_VAR_rhel_ami_idとして渡す想定。

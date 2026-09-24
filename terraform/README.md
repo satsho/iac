@@ -106,6 +106,7 @@ aws cloudformation deploy \
 | `AWS_REGION` | `ap-northeast-1` |
 | `TF_STATE_BUCKET` | Step 1の出力値 |
 | `RHEL_AMI_ID` | Step 6参照。RHEL 9のAMI ID(非機密なのでVariables側) |
+| `ROUTE53_ZONE_ID` | Step 8参照。Route 53 Hosted Zone ID(非機密) |
 
 AWS認証自体はOIDCのためSecrets不要だが、RHELサブスク登録のために下記Secretsが必要
 (詳細はStep 6を参照)。
@@ -203,9 +204,8 @@ sudo kubectl get pods,svc
 インスタンスSG自体は相変わらずSSH/インバウンド直接公開はしていない。
 
 現時点ではHTTPリスナー(80番)のみ。HTTPS化にはACM証明書とドメインが必要なため、
-ドメイン取得・Route 53への委任が済み次第、`dns.tf`(予定)でACM証明書・Route 53
-レコード・443番リスナー(80番はHTTPSへリダイレクト)・CloudFrontディストリビューション
-を追加する。
+Step 8のドメイン委任が済み次第、ACM証明書・443番リスナー(80番はHTTPSへ
+リダイレクト)・CloudFrontディストリビューションを追加する(未実装)。
 
 **動作確認**:
 
@@ -217,6 +217,36 @@ terraform output alb_dns_name
 # ウェルカムページが表示される)
 curl http://<alb_dns_name>/
 ```
+
+### Step 8: ドメインをRoute 53に委任する
+
+お名前.comで`focus4.net`(`var.domain_name`)を取得し、Route 53にDNS委任した。
+Hosted ZoneはAWSコンソールで先に手動作成してしまっていたため、
+`environments/dev/dns.tf`では**新規作成ではなくimportブロックで取り込む**形にしている。
+
+```hcl
+import {
+  to = aws_route53_zone.main
+  id = var.route53_zone_id
+}
+```
+
+手順:
+1. お名前.comでドメインを取得
+2. Route 53コンソールでHosted Zoneを作成(または既存のものを使う)し、
+   払い出された4つのネームサーバーをお名前.com側のネームサーバー設定に登録
+3. `nslookup -type=NS <ドメイン名>`で`awsdns-*.com/net/org/co.uk`の4つが
+   返ってくれば委任完了(反映まで多少時間がかかることがある)
+4. Hosted Zone IDをコンソールで確認し、Step 3の`ROUTE53_ZONE_ID`変数に設定
+5. `plan`→`apply`を実行(`import`ブロックにより新規作成ではなく既存ゾーンを
+   取り込む動きになる。差分が無くなったことを確認できたら`import`ブロックは
+   削除してよい)
+
+**新規にhosted zoneを作り直すと4つのネームサーバーの値が変わり、お名前.com側の
+設定とズレて委任が壊れる**。`environments/dev`は使い捨て前提(`destroy`アクション
+あり)のstateだが、このゾーンだけは`lifecycle { prevent_destroy = true }`で
+保護しており、`destroy`を実行してもこのリソースだけはエラーで止まり残る
+(解除するには明示的にこのブロックを消してから`destroy`する必要がある)。
 
 ## CloudFormation Git Sync(`iac-terraform-role` スタックの自動反映)
 

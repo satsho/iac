@@ -37,6 +37,22 @@ variable "web_node_port" {
   default     = 30080
 }
 
+variable "domain_name" {
+  description = "Webアプリを公開するドメイン名(お名前.comで取得、Route 53に委任済み)"
+  type        = string
+  default     = "focus4.net"
+}
+
+variable "route53_zone_id" {
+  description = <<-EOT
+    domain_nameに対応するRoute 53 Hosted Zone ID。手動でコンソール作成した
+    ゾーンをTerraformのimportブロックで取り込むために使う一度きりの値。
+    Route 53コンソール → Hosted zones → 該当ゾーンのIDを確認して設定する。
+    GitHub VariablesのROUTE53_ZONE_IDからTF_VAR_route53_zone_idとして渡す想定。
+  EOT
+  type        = string
+}
+
 variable "rhel_ami_id" {
   description = <<-EOT
     RHEL 9のAMI ID。EC2コンソールの「インスタンスを起動」画面 → Quick Startタブ →

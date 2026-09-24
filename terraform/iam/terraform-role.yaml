@@ -105,6 +105,11 @@ Resources:
                 Action:
                   - cloudformation:*
                 Resource: '*'
+              - Sid: Route53Broad
+                Effect: Allow
+                Action:
+                  - route53:*
+                Resource: '*'
 
 Outputs:
   RoleArn:

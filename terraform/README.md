@@ -9,10 +9,12 @@ iac/                          # リポジトリルート
 ├── terraform/
 │   ├── bootstrap/            # tfstate用のS3を作る「最初の一回だけ」用のCFNテンプレート
 │   ├── environments/
-│   │   └── dev/              # 実際にVPCとインスタンスを作る環境。ここをterraform plan/applyする
-│   │       # state は1つ(環境ごとにまとめて作成・削除)だが、可読性のため
-│   │       # リソースドメインごとに.tfファイルを分割している:
-│   │       #   network.tf(networkモジュール呼び出し) / security_group.tf / iam.tf / ec2.tf
+│   │   ├── dev/               # 実際にVPCとインスタンスを作る、使い捨て前提の環境
+│   │   │   # state は1つ(環境ごとにまとめて作成・削除)だが、可読性のため
+│   │   │   # リソースドメインごとに.tfファイルを分割している:
+│   │   │   #   network.tf(networkモジュール呼び出し) / security_group.tf / iam.tf / ec2.tf / lb.tf
+│   │   └── dns/                # ドメイン(Route 53 hosted zone)専用の別state。
+│   │       # devとライフサイクルが違う(destroyされたくない)ので分離している
 │   ├── modules/
 │   │   └── network/          # VPC・サブネット・ルーティング一式のモジュール(再利用可能な部品)
 │   ├── iam/                  # IAMロール定義(CFNテンプレート)
@@ -132,7 +134,7 @@ Secrets(Variablesと同じ画面のSecretsタブ)に以下を設定:
 作成したVPC・インスタンス一式が削除される。applyと同じくplan結果を経由するので、
 実行前にログで削除対象を確認できる。
 
-### Step 6: RHEL + RKE2ノードの起動
+### Step 6: RHEL + k3sノードの起動
 
 `environments/dev/ec2.tf` はRHEL 9のAMIを`var.rhel_ami_id`で受け取って起動する設計。
 当初はRed Hat公式所有者ID(`309956199834`)からの`data "aws_ami"`動的検索を
@@ -145,19 +147,32 @@ AMI IDの確認方法:
    RHEL 9系のバージョンを選ぶ
 3. 表示されたAMI ID(`ami-...`)をコピーし、Step 3の`RHEL_AMI_ID`変数に設定
 
-サブスク登録(`subscription-manager register`)とRKE2(シングルノード、server単体)の
-セットアップは、AMIに焼き込むのではなく**起動時のuser_data(cloud-init)** で行う。
-焼き込み方式だとAMIを複数インスタンスで使い回したときにサブスク登録が競合しやすいため。
+サブスク登録(`subscription-manager register`)とk3s(シングルノード、Traefik/ServiceLBは
+無効化してALBを前段に置く構成)のセットアップは、AMIに焼き込むのではなく
+**起動時のuser_data(cloud-init)** で行う。焼き込み方式だとAMIを複数インスタンスで
+使い回したときにサブスク登録が競合しやすいため。
+
+当初はRKE2を使っていたが、「ALB経由でシンプルなWebアプリを公開する」という
+用途に対してはRKE2はオーバースペックだったため、より軽量な**k3s**に切り替えた
+(Rancher/ArgoCD前提の学習は改めて別途行う想定)。`aws_instance`には
+`user_data_replace_on_change = true`を設定しているので、user_dataの内容
+(スクリプトそのものやテンプレート変数)が変わるとインスタンスごと作り直され、
+確実に新しいセットアップが反映される(user_dataは初回起動時にしか実行されないため)。
 
 事前にStep 3で `RHEL_ORG_ID` / `RHEL_ACTIVATION_KEY` のSecretsを設定しておくこと。
 これらはCIワークフロー側で `TF_VAR_rhel_org_id` / `TF_VAR_rhel_activation_key` として
-Terraformに渡され、`templates/rke2-user-data.sh.tpl` に埋め込まれる。
+Terraformに渡され、`templates/k3s-user-data.sh.tpl` に埋め込まれる。
 
 Step 5のTerraform applyを実行すると、RHELインスタンスが起動し初回起動時に
-自動でSSMエージェントのインストール・サブスク登録・RKE2インストール・起動まで
+自動でSSMエージェントのインストール・サブスク登録・k3sインストール・起動まで
 完了する。RHELの公式AMIにはamazon-ssm-agentが同梱されていない(Amazon Linuxと
 異なる点)ため、user_dataの最初のステップとして明示的にインストールしている。
 これによりSSHキーやインバウンドルール無しでもSSM Session Managerが使える。
+
+デモ用のnginx(Deployment + NodePort Service、ポートは`var.web_node_port`
+デフォルト`30080`)は、k3sのマニフェスト自動デプロイディレクトリ
+(`/var/lib/rancher/k3s/server/manifests/`)にuser_dataから直接配置しているので、
+`kubectl apply`を手動で打たなくても起動時に自動で立ち上がる。
 
 **接続確認・動作確認**(SSHキーを使わず、SSM Session Manager経由):
 
@@ -165,19 +180,84 @@ Step 5のTerraform applyを実行すると、RHELインスタンスが起動し�
 aws ssm start-session --target <instance-id>
 
 # インスタンス内で実行
-sudo systemctl status rke2-server
-sudo /var/lib/rancher/rke2/bin/kubectl \
-  --kubeconfig /etc/rancher/rke2/rke2.yaml get nodes
+sudo systemctl status k3s
+sudo kubectl get nodes
+sudo kubectl get pods,svc
 ```
 
 **注意点**:
 - `user_data`の内容(activation key含む)はEC2のインスタンス属性とTerraform state
   (S3、SSE暗号化済み)に平文で残る。完全な秘匿ではないので、activation keyが漏れた
   場合はRed Hat Hybrid Cloud Console側で失効・再発行すること。
-- RKE2は`t2.micro`では非力なため、インスタンスタイプは`t3.medium`
-  (`var.rke2_instance_type`)に変更済み。コストが上がる点に注意。
+- インスタンスタイプは`t3.medium`(`var.rke2_instance_type`、変数名は歴史的経緯でrke2の
+  ままだがk3s/RKE2共通で使っている)。k3s自体はもっと小さいインスタンスでも動くが、
+  当面はそのままにしている。
 - `packer/al2023-nginx.pkr.hcl` / `packer-build.yml` はAmazon Linux 2023 + nginxの
-  検証用AMIを作る別系統のパイプラインで、このRHEL+RKE2インスタンスとは独立している。
+  検証用AMIを作る別系統のパイプラインで、このRHEL+k3sインスタンスとは独立している。
+
+### Step 7: ALB経由でのWebアプリ公開
+
+`environments/dev/lb.tf`でALB(Application Load Balancer)を作成し、Step 6の
+デモnginx(NodePort `30080`)をターゲットグループにアタッチしている。
+
+セキュリティグループは「ALB(80番、インターネットに公開)→ インスタンス
+(`web_node_port`番、ALBのSGからのみ許可)」という一方向の経路のみを許可する形。
+インスタンスSG自体は相変わらずSSH/インバウンド直接公開はしていない。
+
+現時点ではHTTPリスナー(80番)のみ。HTTPS化にはACM証明書とドメインが必要なため、
+Step 8のドメイン委任が済み次第、ACM証明書・443番リスナー(80番はHTTPSへ
+リダイレクト)・CloudFrontディストリビューションを追加する(未実装)。
+
+**動作確認**:
+
+```bash
+# ALBのDNS名を確認
+terraform output alb_dns_name
+
+# ブラウザ or curl でアクセス(ALB→NodePort→nginxまで疎通していればnginxの
+# ウェルカムページが表示される)
+curl http://<alb_dns_name>/
+```
+
+### Step 8: ドメインをRoute 53に委任する(別state)
+
+お名前.comで`focus4.net`を取得し、Route 53にDNS委任した。Hosted Zoneは
+AWSコンソールで先に手動作成してしまっていたため、`environments/dns/dns.tf`
+では**新規作成ではなくimportブロックで取り込む**形にしている。
+
+```hcl
+import {
+  to = aws_route53_zone.main
+  id = "Z00444252EVDC2QR0ELW1"
+}
+```
+
+ドメインは`environments/dev`(VPC・EC2など使い捨て前提のリソース群)とは
+**ライフサイクルが根本的に違う**(destroyされたくない、devとは無関係に
+存続してほしい)ため、`environments/dns`という別ディレクトリ・別state
+(`dns/terraform.tfstate`)に分離している。実行も専用ワークフロー
+`.github/workflows/terraform-dns.yml`(`terraform-vpc.yml`と同じ構造、
+working-directoryだけ`environments/dns`)を使う。
+
+手順:
+1. お名前.comでドメインを取得
+2. Route 53コンソールでHosted Zoneを作成(または既存のものを使う)し、
+   払い出された4つのネームサーバーをお名前.com側のネームサーバー設定に登録
+3. `nslookup -type=NS <ドメイン名>`で`awsdns-*.com/net/org/co.uk`の4つが
+   返ってくれば委任完了(反映まで多少時間がかかることがある)
+4. `terraform-dns.yml`を`plan`→`apply`で実行(`import`ブロックにより
+   新規作成ではなく既存ゾーンを取り込む動きになる。差分が無くなったことを
+   確認できたら`import`ブロックは削除してよい)
+
+**新規にhosted zoneを作り直すと4つのネームサーバーの値が変わり、お名前.com側の
+設定とズレて委任が壊れる**ので、state分離に加えて`lifecycle { prevent_destroy
+= true }`でも保護している。`terraform-dns.yml`で`destroy`を実行しても
+このリソースだけはエラーで止まる(解除するには明示的にこのブロックを消して
+から`destroy`する必要がある)。
+
+tfstate用S3バケットへのIAM権限(`terraform-role.yaml`の`TerraformStateS3`)は
+元々`dev/*`プレフィックス限定だったが、`dns/terraform.tfstate`という別キーを
+使うためバケット全体への許可に広げてある。
 
 ## CloudFormation Git Sync(`iac-terraform-role` スタックの自動反映)
 

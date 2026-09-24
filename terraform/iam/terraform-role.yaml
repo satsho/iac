@@ -80,13 +80,15 @@ Resources:
                 Condition:
                   StringEquals:
                     aws:RequestedRegion: !Ref AwsRegion
+              # dev/dnsなど複数stateキーをこのバケット配下で使うため、
+              # devプレフィックス限定ではなくバケット全体に許可する。
               - Sid: TerraformStateS3
                 Effect: Allow
                 Action:
                   - s3:GetObject
                   - s3:PutObject
                   - s3:DeleteObject
-                Resource: !Sub 'arn:aws:s3:::${TFStateBucketName}/dev/*'
+                Resource: !Sub 'arn:aws:s3:::${TFStateBucketName}/*'
               - Sid: TerraformStateS3List
                 Effect: Allow
                 Action: s3:ListBucket
@@ -104,6 +106,11 @@ Resources:
                 Effect: Allow
                 Action:
                   - cloudformation:*
+                Resource: '*'
+              - Sid: Route53Broad
+                Effect: Allow
+                Action:
+                  - route53:*
                 Resource: '*'
 
 Outputs:

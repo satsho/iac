@@ -31,6 +31,12 @@ variable "rke2_instance_type" {
   default     = "t3.medium"
 }
 
+variable "web_node_port" {
+  description = "デモWebアプリ(nginx)をk3s上でNodePort公開するポート番号。ALBのターゲットグループも同じポートに転送する"
+  type        = number
+  default     = 30080
+}
+
 variable "rhel_ami_id" {
   description = <<-EOT
     RHEL 9のAMI ID。EC2コンソールの「インスタンスを起動」画面 → Quick Startタブ →

@@ -14,8 +14,16 @@ subscription-manager register \
 
 # activation key側でリポジトリが有効化されていない場合の保険(失敗しても続行)
 subscription-manager repos \
-  --enable="rhel-9-for-x86_64-baseos-rpms" \
-  --enable="rhel-9-for-x86_64-appstream-rpms" || true
+  --enable="rhel-10-for-x86_64-baseos-rhui-rpms" \
+  --enable="rhel-10-for-x86_64-appstream-rhui-rpms" || true
+
+# k3s(flannel/kube-proxy)がiptables-nftでルールを組むのに br_netfilter 等の
+# カーネルモジュールが要る。"dnf install kernel-modules-extra" だけだと
+# リポジトリ内の最新バージョンが入り、今起動しているカーネルのバージョンと
+# 食い違ってモジュールが見つからないことがあるため、起動中のカーネルに
+# 正確に一致するパッケージ名を明示的に指定する。
+dnf install -y "kernel-modules-extra-$(uname -r)"
+modprobe br_netfilter
 
 # k3sの自動デプロイ用ディレクトリにデモ用nginxを事前配置しておく。
 # server起動時にk3s自身がこのディレクトリを監視してapplyする(ArgoCDはまだ無いため)。

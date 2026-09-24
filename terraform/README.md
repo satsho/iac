@@ -107,7 +107,7 @@ aws cloudformation deploy \
 | `AWS_ROLE_ARN` | Step 2の出力値(`arn:aws:iam::563613886922:role/github-actions-terraform`) |
 | `AWS_REGION` | `ap-northeast-1` |
 | `TF_STATE_BUCKET` | Step 1の出力値 |
-| `RHEL_AMI_ID` | Step 6参照。RHEL 9のAMI ID(非機密なのでVariables側) |
+| `RHEL_AMI_ID` | Step 6参照。RHEL 10.2のAMI ID(非機密なのでVariables側) |
 
 AWS認証自体はOIDCのためSecrets不要だが、RHELサブスク登録のために下記Secretsが必要
 (詳細はStep 6を参照)。
@@ -136,7 +136,7 @@ Secrets(Variablesと同じ画面のSecretsタブ)に以下を設定:
 
 ### Step 6: RHEL + k3sノードの起動
 
-`environments/dev/ec2.tf` はRHEL 9のAMIを`var.rhel_ami_id`で受け取って起動する設計。
+`environments/dev/ec2.tf` はRHEL 10.2のAMIを`var.rhel_ami_id`で受け取って起動する設計。
 当初はRed Hat公式所有者ID(`309956199834`)からの`data "aws_ami"`動的検索を
 試みたが、このAWSアカウント/リージョンでは該当AMIが見えず断念し、
 **AMI IDを直接変数で渡す方式**にしている。
@@ -144,7 +144,7 @@ Secrets(Variablesと同じ画面のSecretsタブ)に以下を設定:
 AMI IDの確認方法:
 1. EC2コンソールで「インスタンスを起動」画面を開く(起動はしない)
 2. 「アプリケーションおよびOSイメージ」→ Quick Startタブ → Red Hatを選択、
-   RHEL 9系のバージョンを選ぶ
+   RHEL 10系のバージョンを選ぶ
 3. 表示されたAMI ID(`ami-...`)をコピーし、Step 3の`RHEL_AMI_ID`変数に設定
 
 サブスク登録(`subscription-manager register`)とk3s(シングルノード、Traefik/ServiceLBは
@@ -173,6 +173,15 @@ Step 5のTerraform applyを実行すると、RHELインスタンスが起動し�
 デフォルト`30080`)は、k3sのマニフェスト自動デプロイディレクトリ
 (`/var/lib/rancher/k3s/server/manifests/`)にuser_dataから直接配置しているので、
 `kubectl apply`を手動で打たなくても起動時に自動で立ち上がる。
+
+**ハマった点**: 初回構築時、Podは起動するのにNodePort/Service経由の通信が
+一切通らない(`curl localhost:30080`が`Connection refused`)現象が発生した。
+原因は`kernel-modules-extra`パッケージが`dnf install`時にリポジトリ内の
+最新バージョンで入ってしまい、実際に起動中のカーネルバージョンと食い違って
+`br_netfilter`等のモジュールが見つからなかったこと(k3s/flannel/kube-proxyは
+iptables-nftでルールを組むのにこれらのカーネルモジュールを必要とする)。
+`kernel-modules-extra-$(uname -r)`と明示的にバージョンを指定してインストール
+することで解消した。user_data側でも同様に明示バージョン指定にしてある。
 
 **接続確認・動作確認**(SSHキーを使わず、SSM Session Manager経由):
 

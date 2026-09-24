@@ -9,10 +9,12 @@ iac/                          # リポジトリルート
 ├── terraform/
 │   ├── bootstrap/            # tfstate用のS3を作る「最初の一回だけ」用のCFNテンプレート
 │   ├── environments/
-│   │   └── dev/              # 実際にVPCとインスタンスを作る環境。ここをterraform plan/applyする
-│   │       # state は1つ(環境ごとにまとめて作成・削除)だが、可読性のため
-│   │       # リソースドメインごとに.tfファイルを分割している:
-│   │       #   network.tf(networkモジュール呼び出し) / security_group.tf / iam.tf / ec2.tf / lb.tf
+│   │   ├── dev/               # 実際にVPCとインスタンスを作る、使い捨て前提の環境
+│   │   │   # state は1つ(環境ごとにまとめて作成・削除)だが、可読性のため
+│   │   │   # リソースドメインごとに.tfファイルを分割している:
+│   │   │   #   network.tf(networkモジュール呼び出し) / security_group.tf / iam.tf / ec2.tf / lb.tf
+│   │   └── dns/                # ドメイン(Route 53 hosted zone)専用の別state。
+│   │       # devとライフサイクルが違う(destroyされたくない)ので分離している
 │   ├── modules/
 │   │   └── network/          # VPC・サブネット・ルーティング一式のモジュール(再利用可能な部品)
 │   ├── iam/                  # IAMロール定義(CFNテンプレート)
@@ -106,7 +108,6 @@ aws cloudformation deploy \
 | `AWS_REGION` | `ap-northeast-1` |
 | `TF_STATE_BUCKET` | Step 1の出力値 |
 | `RHEL_AMI_ID` | Step 6参照。RHEL 9のAMI ID(非機密なのでVariables側) |
-| `ROUTE53_ZONE_ID` | Step 8参照。Route 53 Hosted Zone ID(非機密) |
 
 AWS認証自体はOIDCのためSecrets不要だが、RHELサブスク登録のために下記Secretsが必要
 (詳細はStep 6を参照)。
@@ -218,18 +219,25 @@ terraform output alb_dns_name
 curl http://<alb_dns_name>/
 ```
 
-### Step 8: ドメインをRoute 53に委任する
+### Step 8: ドメインをRoute 53に委任する(別state)
 
-お名前.comで`focus4.net`(`var.domain_name`)を取得し、Route 53にDNS委任した。
-Hosted ZoneはAWSコンソールで先に手動作成してしまっていたため、
-`environments/dev/dns.tf`では**新規作成ではなくimportブロックで取り込む**形にしている。
+お名前.comで`focus4.net`を取得し、Route 53にDNS委任した。Hosted Zoneは
+AWSコンソールで先に手動作成してしまっていたため、`environments/dns/dns.tf`
+では**新規作成ではなくimportブロックで取り込む**形にしている。
 
 ```hcl
 import {
   to = aws_route53_zone.main
-  id = var.route53_zone_id
+  id = "Z00444252EVDC2QR0ELW1"
 }
 ```
+
+ドメインは`environments/dev`(VPC・EC2など使い捨て前提のリソース群)とは
+**ライフサイクルが根本的に違う**(destroyされたくない、devとは無関係に
+存続してほしい)ため、`environments/dns`という別ディレクトリ・別state
+(`dns/terraform.tfstate`)に分離している。実行も専用ワークフロー
+`.github/workflows/terraform-dns.yml`(`terraform-vpc.yml`と同じ構造、
+working-directoryだけ`environments/dns`)を使う。
 
 手順:
 1. お名前.comでドメインを取得
@@ -237,16 +245,19 @@ import {
    払い出された4つのネームサーバーをお名前.com側のネームサーバー設定に登録
 3. `nslookup -type=NS <ドメイン名>`で`awsdns-*.com/net/org/co.uk`の4つが
    返ってくれば委任完了(反映まで多少時間がかかることがある)
-4. Hosted Zone IDをコンソールで確認し、Step 3の`ROUTE53_ZONE_ID`変数に設定
-5. `plan`→`apply`を実行(`import`ブロックにより新規作成ではなく既存ゾーンを
-   取り込む動きになる。差分が無くなったことを確認できたら`import`ブロックは
-   削除してよい)
+4. `terraform-dns.yml`を`plan`→`apply`で実行(`import`ブロックにより
+   新規作成ではなく既存ゾーンを取り込む動きになる。差分が無くなったことを
+   確認できたら`import`ブロックは削除してよい)
 
 **新規にhosted zoneを作り直すと4つのネームサーバーの値が変わり、お名前.com側の
-設定とズレて委任が壊れる**。`environments/dev`は使い捨て前提(`destroy`アクション
-あり)のstateだが、このゾーンだけは`lifecycle { prevent_destroy = true }`で
-保護しており、`destroy`を実行してもこのリソースだけはエラーで止まり残る
-(解除するには明示的にこのブロックを消してから`destroy`する必要がある)。
+設定とズレて委任が壊れる**ので、state分離に加えて`lifecycle { prevent_destroy
+= true }`でも保護している。`terraform-dns.yml`で`destroy`を実行しても
+このリソースだけはエラーで止まる(解除するには明示的にこのブロックを消して
+から`destroy`する必要がある)。
+
+tfstate用S3バケットへのIAM権限(`terraform-role.yaml`の`TerraformStateS3`)は
+元々`dev/*`プレフィックス限定だったが、`dns/terraform.tfstate`という別キーを
+使うためバケット全体への許可に広げてある。
 
 ## CloudFormation Git Sync(`iac-terraform-role` スタックの自動反映)
 

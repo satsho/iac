@@ -1,4 +1,4 @@
-name: Terraform VPC (dev)
+name: Terraform Infra (dev)
 
 on:
   workflow_dispatch:

@@ -1,6 +1,7 @@
-# satsho/iac — Terraform VPC PoC
+# satsho/iac — Terraform Infra PoC
 
-GitHub Actions (OIDC) から Terraform で VPC を作成するトライアル構成。
+GitHub Actions (OIDC) から Terraform でVPC・EC2・ALB等のインフラ一式を
+作成するトライアル構成。
 
 ## ディレクトリ構成
 
@@ -126,7 +127,7 @@ Secrets(Variablesと同じ画面のSecretsタブ)に以下を設定:
 
 ### Step 5: GitHub Actionsでplan/apply/destroyを実行
 
-`.github/workflows/terraform-vpc.yml` を使って、`workflow_dispatch` で手動実行。
+`.github/workflows/terraform-infra.yml` を使って、`workflow_dispatch` で手動実行。
 `action`入力で `plan` / `apply` / `destroy` を選べる。
 このワークフローは `terraform/environments/dev` を作業ディレクトリとして動く。
 
@@ -213,9 +214,7 @@ sudo kubectl get pods,svc
 (`web_node_port`番、ALBのSGからのみ許可)」という一方向の経路のみを許可する形。
 インスタンスSG自体は相変わらずSSH/インバウンド直接公開はしていない。
 
-現時点ではHTTPリスナー(80番)のみ。HTTPS化にはACM証明書とドメインが必要なため、
-Step 8のドメイン委任が済み次第、ACM証明書・443番リスナー(80番はHTTPSへ
-リダイレクト)・CloudFrontディストリビューションを追加する(未実装)。
+HTTPS化(ACM証明書・443番リスナー・80→443リダイレクト)はStep 9を参照。
 
 **動作確認**:
 
@@ -245,7 +244,7 @@ import {
 **ライフサイクルが根本的に違う**(destroyされたくない、devとは無関係に
 存続してほしい)ため、`environments/dns`という別ディレクトリ・別state
 (`dns/terraform.tfstate`)に分離している。実行も専用ワークフロー
-`.github/workflows/terraform-dns.yml`(`terraform-vpc.yml`と同じ構造、
+`.github/workflows/terraform-dns.yml`(`terraform-infra.yml`と同じ構造、
 working-directoryだけ`environments/dns`)を使う。
 
 手順:
@@ -267,6 +266,44 @@ working-directoryだけ`environments/dns`)を使う。
 tfstate用S3バケットへのIAM権限(`terraform-role.yaml`の`TerraformStateS3`)は
 元々`dev/*`プレフィックス限定だったが、`dns/terraform.tfstate`という別キーを
 使うためバケット全体への許可に広げてある。
+
+### Step 9: ALBのHTTPS化(ACM証明書 + 443番リスナー)
+
+`environments/dev/acm.tf`でDNS検証方式のACM証明書(`focus4.net`)を発行し、
+`environments/dev/lb.tf`のALBに443番リスナーとしてアタッチした。80番リスナーは
+forwardではなく443番への301リダイレクトに変更している。
+
+証明書はapex(`focus4.net`)一つのみ。ゾーン自体はStep 8の通り`environments/dns`
+という別stateで管理しているため、DNS検証用レコードとALB向けのエイリアス
+Aレコードは`data "terraform_remote_state" "dns"`経由で`environments/dns`の
+tfstateから`zone_id`を読み取って`environments/dev`側から作成している
+(ゾーンの所有権はdns state、レコードの追加はdev stateという分担)。
+
+```hcl
+data "terraform_remote_state" "dns" {
+  backend = "s3"
+  config = {
+    bucket = "satsho-iac-tfstate"
+    key    = "dns/terraform.tfstate"
+    region = var.aws_region
+  }
+}
+```
+
+証明書のライフサイクルは`environments/dev`側にあるため、`dev`スタックを
+destroy→再applyすると証明書もDNS検証からやり直しになる(トライアル段階の
+使い捨てstateなので許容している)。ゾーン自体は別stateなので、この
+destroy/apply往復でドメイン委任(NSレコード)が壊れることはない。
+
+**動作確認**:
+
+```bash
+terraform output web_url          # => "https://focus4.net"
+curl -I https://focus4.net/       # 200が返ればOK
+curl -I http://focus4.net/        # 301 → https://focus4.net/ へのLocationヘッダ
+```
+
+CloudFront CDNは未実装(将来的にALBの前段に追加予定)。
 
 ## CloudFormation Git Sync(`iac-terraform-role` スタックの自動反映)
 

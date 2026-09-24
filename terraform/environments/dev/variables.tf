@@ -31,6 +31,12 @@ variable "rke2_instance_type" {
   default     = "t3.medium"
 }
 
+variable "domain_name" {
+  description = "ACM証明書とALBのエイリアスレコードに使うドメイン名。ゾーン自体はenvironments/dnsで管理している"
+  type        = string
+  default     = "focus4.net"
+}
+
 variable "web_node_port" {
   description = "デモWebアプリ(nginx)をk3s上でNodePort公開するポート番号。ALBのターゲットグループも同じポートに転送する"
   type        = number

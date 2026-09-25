@@ -1,0 +1,15 @@
+# nodePortはterraform/environments/dev側のvar.web_node_port(デフォルト30080)と
+# 値を一致させること。ALBのターゲットグループがこのポートに転送している。
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-nginx
+  namespace: default
+spec:
+  type: NodePort
+  selector:
+    app: demo-nginx
+  ports:
+    - port: 80
+      targetPort: 80
+      nodePort: 30080

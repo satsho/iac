@@ -26,11 +26,15 @@ resource "aws_instance" "k3s" {
     http_endpoint = "enabled"
   }
 
-  user_data = templatefile("${path.module}/templates/k3s-user-data.sh.tpl", {
-    aws_region          = var.aws_region
-    rhel_org_id         = var.rhel_org_id
-    rhel_activation_key = var.rhel_activation_key
-    node_port           = var.web_node_port
+  user_data = templatefile("${path.module}/templates/ansible-bootstrap.sh.tpl", {
+    aws_region            = var.aws_region
+    rhel_org_id           = var.rhel_org_id
+    rhel_activation_key   = var.rhel_activation_key
+    ansible_repo_url      = var.ansible_repo_url
+    ansible_repo_revision = var.ansible_repo_revision
+    argocd_repo_url       = var.argocd_repo_url
+    argocd_repo_path      = var.argocd_repo_path
+    argocd_repo_revision  = var.argocd_repo_revision
   })
 
   tags = {

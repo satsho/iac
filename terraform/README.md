@@ -305,6 +305,61 @@ curl -I http://focus4.net/        # 301 → https://focus4.net/ へのLocation�
 
 CloudFront CDNは未実装(将来的にALBの前段に追加予定)。
 
+### Step 10: Ansible + ArgoCDによるGitOps化
+
+これまで`user_data`に直書きしていたRHELセットアップ・k3sインストール・デモアプリの
+デプロイを、Ansible playbookとArgoCDのGitOpsに置き換えた。
+
+**構成:**
+
+```
+Terraform (ec2.tf)
+  └─ user_data (templates/ansible-bootstrap.sh.tpl)
+       ├─ amazon-ssm-agentインストール
+       ├─ subscription-manager register / repos --enable
+       │    (dnfでのパッケージインストール全般の前提になるため、
+       │     ここだけはAnsibleに移譲せずuser_dataで行う)
+       ├─ ansible-core・gitのインストール
+       └─ ansible-pull 実行
+              │
+              ▼
+ansible/playbook.yml (このリポジトリ、GitHubから直接pull)
+  ├─ kernel-modules-extra・br_netfilterのセットアップ
+  ├─ k3sインストール(--disable traefik --disable servicelb)
+  └─ ArgoCDインストール + Applicationリソースの適用
+              │
+              ▼
+ArgoCD (クラスタ内で稼働)
+  └─ manifests/demo-nginx/ (このリポジトリ) を継続的に同期
+       (プッシュするたびにArgoCDが自動でPull・適用・selfHeal)
+```
+
+`ansible-pull`を使っているのは、SSH鍵を配らずSSM限定でアクセスするという既存方針を
+崩さないため。インスタンス自身が起動時にGitHub(公開リポジトリ)からplaybookを
+pullしてローカル実行するので、CI側からSSHでpushする必要がない。
+
+**GitOps対象のマニフェスト(`manifests/demo-nginx/`)を変更する場合**、Terraformの
+再applyは不要で、単にこのリポジトリの`main`にpushするだけでArgoCDが自動的に
+差分を検知して適用する(`syncPolicy.automated`で`prune`・`selfHeal`を有効化済み)。
+
+**動作確認**:
+
+```bash
+# SSM Session Manager経由でインスタンスに接続
+aws ssm start-session --target <instance_id>
+
+# ArgoCDの同期状況を確認
+sudo /usr/local/bin/kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml \
+  -n argocd get applications
+
+# ArgoCD管理下のPod/Serviceを確認
+sudo /usr/local/bin/kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml \
+  get pods,svc -n default
+```
+
+ArgoCDのWeb UIは現時点では外部公開していない(SSM経由のポートフォワードで見る想定)。
+Rancherの導入は後回し(今回はArgoCD単体でのGitOps運用を優先)。
+
 ## CloudFormation Git Sync(`iac-terraform-role` スタックの自動反映)
 
 Step 2のIAMロール(`iac-terraform-role`スタック)は、権限不足エラーが出るたびに

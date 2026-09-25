@@ -38,9 +38,39 @@ variable "domain_name" {
 }
 
 variable "web_node_port" {
-  description = "デモWebアプリ(nginx)をk3s上でNodePort公開するポート番号。ALBのターゲットグループも同じポートに転送する"
+  description = "デモWebアプリ(nginx)のNodePort番号。ALBのターゲットグループもこのポートに転送する。manifests/demo-nginx/service.yamlのnodePortと値を一致させること(GitOps移行後はTerraform変数からは注入していない)"
   type        = number
   default     = 30080
+}
+
+variable "ansible_repo_url" {
+  description = "ansible-pullで取得するAnsible playbookのGitリポジトリURL(HTTPS、公開リポジトリ前提。認証なしでcloneできる必要がある)"
+  type        = string
+  default     = "https://github.com/satsho/iac.git"
+}
+
+variable "ansible_repo_revision" {
+  description = "ansible_repo_urlのうち、ansible-pullでcheckoutするブランチ/タグ"
+  type        = string
+  default     = "main"
+}
+
+variable "argocd_repo_url" {
+  description = "ArgoCDが同期するGitOps用マニフェストのリポジトリURL"
+  type        = string
+  default     = "https://github.com/satsho/iac.git"
+}
+
+variable "argocd_repo_path" {
+  description = "argocd_repo_url内の、ArgoCDが同期するマニフェストのパス"
+  type        = string
+  default     = "manifests/demo-nginx"
+}
+
+variable "argocd_repo_revision" {
+  description = "argocd_repo_urlのうち、ArgoCDが追従するブランチ"
+  type        = string
+  default     = "main"
 }
 
 variable "rhel_ami_id" {

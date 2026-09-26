@@ -419,6 +419,19 @@ Tailscale自体はAWS Security Groupを経由しない(WireGuardのUDPトンネ�
 折り返すため、NodePortへのアクセスはAWS側のインバウンドルールの対象外)。
 そのためKeycloakのNodePort用のSecurity GroupルールもALB向けには不要になった。
 
+**MagicDNSでIPアドレスを覚えずにアクセスする:**
+
+`tailscale up`のホスト名は固定値`iac-poc-dev`を指定している(OSのホスト名は
+プライベートIP由来でインスタンス作り直しごとに変わるため、固定しないとMagicDNS名も
+毎回変わってしまう)。Tailscale管理コンソール(https://login.tailscale.com/admin/dns)
+でMagicDNSを有効にすれば、tailnetに参加している端末からは`http://iac-poc-dev.<tailnet名>.ts.net:30090/`
+でアクセスできるようになる(IPアドレスを都度確認する必要がなくなる)。
+
+なお、devスタックのdestroy/apply毎に新しいインスタンスが同じホスト名で参加しようとするため、
+古いインスタンス分のTailscale側デバイス登録が消えずに残り続ける(名前が重複した場合は
+`iac-poc-dev-1`のように連番が振られる)。気になる場合は、auth key発行時に**Ephemeral**も
+有効にしておくと、インスタンス終了時にTailscale側のデバイス登録も自動的に消える。
+
 ## CloudFormation Git Sync(`iac-terraform-role` スタックの自動反映)
 
 Step 2のIAMロール(`iac-terraform-role`スタック)は、権限不足エラーが出るたびに

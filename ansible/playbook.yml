@@ -36,10 +36,13 @@
 
     # Keycloak(NodePort)をALBで世界に公開する代わりに、Tailscaleのtailnet経由
     # でのみ到達可能にする。auth keyはログに残らないようno_logで隠す。
+    # ホスト名はansible_hostname(OSのホスト名、プライベートIP由来で
+    # インスタンス作り直しごとに変わる)ではなく固定値にして、MagicDNS名
+    # (iac-poc-dev.<tailnet>.ts.net)が毎回変わらないようにする。
     - name: Join the Tailscale network
       ansible.builtin.command: >
         tailscale up --authkey={{ tailscale_auth_key }}
-        --hostname={{ ansible_hostname }} --accept-dns=false
+        --hostname=iac-poc-dev --accept-dns=false
       changed_when: true
       no_log: true
 

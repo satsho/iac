@@ -11,8 +11,13 @@ data "terraform_remote_state" "dns" {
 }
 
 resource "aws_acm_certificate" "web" {
-  domain_name       = var.domain_name
-  validation_method = "DNS"
+  domain_name = var.domain_name
+  # subject_alternative_namesはProvider側でComputed属性のため、この引数自体を
+  # 省略すると「値の決定をProviderに委ねる」扱いになり、以前keycloakのSANを
+  # 追加した際の値が残ったまま差分が検知されない。明示的に空リストを指定して
+  # 確実にSANなしの状態へ収束させる。
+  subject_alternative_names = []
+  validation_method         = "DNS"
 
   lifecycle {
     create_before_destroy = true

@@ -11,9 +11,8 @@ data "terraform_remote_state" "dns" {
 }
 
 resource "aws_acm_certificate" "web" {
-  domain_name               = var.domain_name
-  subject_alternative_names = ["keycloak.${var.domain_name}"]
-  validation_method         = "DNS"
+  domain_name       = var.domain_name
+  validation_method = "DNS"
 
   lifecycle {
     create_before_destroy = true
@@ -50,18 +49,6 @@ resource "aws_acm_certificate_validation" "web" {
 resource "aws_route53_record" "web_alias" {
   zone_id = data.terraform_remote_state.dns.outputs.zone_id
   name    = var.domain_name
-  type    = "A"
-
-  alias {
-    name                   = aws_lb.web.dns_name
-    zone_id                = aws_lb.web.zone_id
-    evaluate_target_health = true
-  }
-}
-
-resource "aws_route53_record" "keycloak_alias" {
-  zone_id = data.terraform_remote_state.dns.outputs.zone_id
-  name    = "keycloak.${var.domain_name}"
   type    = "A"
 
   alias {

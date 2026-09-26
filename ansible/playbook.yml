@@ -13,6 +13,36 @@
         name: "kernel-modules-extra-{{ ansible_kernel }}"
         state: present
 
+    - name: Check whether Tailscale is already installed
+      ansible.builtin.command: which tailscale
+      register: tailscale_bin
+      failed_when: false
+      changed_when: false
+
+    - name: Install Tailscale
+      ansible.builtin.shell: |
+        set -o pipefail
+        curl -fsSL https://tailscale.com/install.sh | sh
+      args:
+        executable: /bin/bash
+      when: tailscale_bin.rc != 0
+      changed_when: true
+
+    - name: Ensure tailscaled is enabled and running
+      ansible.builtin.systemd:
+        name: tailscaled
+        enabled: true
+        state: started
+
+    # Keycloak(NodePort)をALBで世界に公開する代わりに、Tailscaleのtailnet経由
+    # でのみ到達可能にする。auth keyはログに残らないようno_logで隠す。
+    - name: Join the Tailscale network
+      ansible.builtin.command: >
+        tailscale up --authkey={{ tailscale_auth_key }}
+        --hostname={{ ansible_hostname }} --accept-dns=false
+      changed_when: true
+      no_log: true
+
     - name: Load br_netfilter kernel module now
       ansible.builtin.command: modprobe br_netfilter
       changed_when: false

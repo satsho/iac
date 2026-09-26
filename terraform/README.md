@@ -367,13 +367,17 @@ Rancherの導入は後回し(今回はArgoCD単体でのGitOps運用を優先)�
 `argocd_apps`リストに`keycloak`エントリを追加)。`start-dev`モード(埋め込みH2、
 再起動でデータは消える)で動かしており、永続化(家のPostgresへの接続)は未対応。
 
+当初はALBで`https://keycloak.focus4.net`として世界に公開していたが、「管理コンソールの
+入口そのものが世界中から見える」のは望ましくないため、**ALBには繋がず、Tailscale経由
+でのみ到達可能**にする構成に変更した(下記Step 12)。
+
 **構成:**
 
 ```
-ALB(https://keycloak.focus4.net) ── ACM証明書はfocus4.netのSANとして追加
-  └─ aws_lb_listener_rule(host_headerで振り分け)
-       └─ Target Group(keycloak_node_port=30090)
-            └─ k3s: keycloak Service(NodePort) → keycloak Deployment(start-dev)
+Tailscale tailnet(自分のPCも参加済み)
+  └─ EC2(ansible/playbook.ymlがtailscale up)
+       └─ k3s: keycloak Service(NodePort 30090) → keycloak Deployment(start-dev)
+            (http://<EC2のTailscale IP>:30090/ で自分のPCからのみアクセス可能)
 
 ALB(https://focus4.net、変更なし)
   └─ 従来のdemo-nginx用Target Group
@@ -386,16 +390,34 @@ ALB(https://focus4.net、変更なし)
 **動作確認**:
 
 ```bash
-# ブラウザで管理コンソールにアクセス
-open https://keycloak.focus4.net/
-
-# 管理者パスワードの確認(SSM Session Manager経由)
+# SSM Session Manager経由でインスタンスに接続し、Tailscale IPと管理者パスワードを確認
 aws ssm start-session --target <instance_id>
+tailscale ip -4
 sudo cat /root/keycloak-admin-credentials.txt
+
+# 自分のPC(同じtailnetに参加済み)のブラウザでアクセス
+open http://<上で確認したTailscale IP>:30090/
 ```
 
-次のステップ(未実装): 家のサーバのPostgresへの接続(Tailscale経由)でデータを永続化、
-`oauth2-proxy`をnginxの前段に挟んでKeycloakでログインさせる構成。
+次のステップ(未実装): 家のサーバのPostgresへの接続(同じくTailscale経由)でデータを
+永続化、`oauth2-proxy`をnginxの前段に挟んでKeycloakでログインさせる構成。
+
+### Step 12: TailscaleによるプライベートネットワークへのEC2参加
+
+Keycloakを世界に公開せず、自分のPCからだけアクセスできるようにするため、
+`ansible/playbook.yml`でEC2をTailscaleのtailnetに参加させている。
+
+- auth keyはTailscale管理コンソール(Settings → Keys)で**Reusable**を指定して発行
+  (`user_data_replace_on_change`によりdevスタックのdestroy/apply毎にインスタンスが
+  作り直されるため、都度再参加できる必要がある)
+- GitHub Secretsに`TAILSCALE_AUTH_KEY`として登録し、
+  `TF_VAR_tailscale_auth_key`経由でTerraformに渡す(`rhel_org_id`等と同じ扱い)
+- `tailscale up`のコマンドライン(auth keyを含む)がログに残らないよう
+  Ansibleタスクには`no_log: true`を付けている
+
+Tailscale自体はAWS Security Groupを経由しない(WireGuardのUDPトンネル内で
+折り返すため、NodePortへのアクセスはAWS側のインバウンドルールの対象外)。
+そのためKeycloakのNodePort用のSecurity GroupルールもALB向けには不要になった。
 
 ## CloudFormation Git Sync(`iac-terraform-role` スタックの自動反映)
 

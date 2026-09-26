@@ -88,10 +88,10 @@ variable "argocd_apps" {
   ]
 }
 
-variable "keycloak_node_port" {
-  description = "KeycloakのNodePort番号。ALBのターゲットグループもこのポートに転送する。manifests/keycloak/service.yamlのnodePortと値を一致させること"
-  type        = number
-  default     = 30090
+variable "tailscale_auth_key" {
+  description = "EC2をtailnetに参加させるためのTailscale auth key。Reusable(再利用可能)を指定して発行すること(user_data_replace_on_changeでインスタンスが作り直されるたびに再参加する必要があるため)。GitHub SecretsからTF_VAR_tailscale_auth_keyとして渡す"
+  type        = string
+  sensitive   = true
 }
 
 variable "rhel_ami_id" {

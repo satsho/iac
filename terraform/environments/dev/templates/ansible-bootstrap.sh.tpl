@@ -27,8 +27,8 @@ mkdir -p /etc/ansible
 cat <<EOT > /etc/ansible/extra-vars.json
 {
   "argocd_repo_url": "${argocd_repo_url}",
-  "argocd_repo_path": "${argocd_repo_path}",
-  "argocd_repo_revision": "${argocd_repo_revision}"
+  "argocd_repo_revision": "${argocd_repo_revision}",
+  "argocd_apps": ${jsonencode(argocd_apps)}
 }
 EOT
 chmod 600 /etc/ansible/extra-vars.json

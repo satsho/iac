@@ -77,15 +77,51 @@
         wait --for=condition=Established crd/applications.argoproj.io --timeout=120s
       changed_when: false
 
-    - name: Render the ArgoCD Application manifest (GitOpsのエントリポイント)
+    - name: Create the keycloak namespace
+      ansible.builtin.command: /usr/local/bin/kubectl --kubeconfig={{ kubeconfig }} create namespace keycloak
+      register: keycloak_ns
+      failed_when: keycloak_ns.rc != 0 and 'AlreadyExists' not in keycloak_ns.stderr
+      changed_when: keycloak_ns.rc == 0
+
+    - name: Check whether the Keycloak admin secret already exists
+      ansible.builtin.command: /usr/local/bin/kubectl --kubeconfig={{ kubeconfig }} -n keycloak get secret keycloak-admin
+      register: keycloak_secret
+      failed_when: false
+      changed_when: false
+
+    # publicリポジトリにパスワードを平文でコミットしたくないため、
+    # Secretはansibleが起動ごとに乱数生成してkubectlで直接投入する
+    # (ArgoCDのGitOps管理からは意図的に外す)。
+    - name: Generate a random Keycloak admin password
+      ansible.builtin.set_fact:
+        keycloak_admin_password: "{{ lookup('password', '/dev/null length=24 chars=ascii_letters,digits') }}"
+      when: keycloak_secret.rc != 0
+
+    - name: Create the Keycloak admin secret
+      ansible.builtin.command: >
+        /usr/local/bin/kubectl --kubeconfig={{ kubeconfig }} -n keycloak
+        create secret generic keycloak-admin
+        --from-literal=username=admin
+        --from-literal=password={{ keycloak_admin_password }}
+      when: keycloak_secret.rc != 0
+      changed_when: true
+
+    - name: Save the Keycloak admin password for retrieval via SSM
+      ansible.builtin.copy:
+        dest: /root/keycloak-admin-credentials.txt
+        content: "username=admin\npassword={{ keycloak_admin_password }}\n"
+        mode: "0600"
+      when: keycloak_secret.rc != 0
+
+    - name: Render the ArgoCD Application manifests (GitOpsのエントリポイント)
       ansible.builtin.template:
-        src: templates/argocd-application.yaml.j2
-        dest: /etc/rancher/k3s/argocd-application.yaml
+        src: templates/argocd-applications.yaml.j2
+        dest: /etc/rancher/k3s/argocd-applications.yaml
         mode: "0644"
 
-    - name: Apply the ArgoCD Application
+    - name: Apply the ArgoCD Applications
       ansible.builtin.command: >
         /usr/local/bin/kubectl --kubeconfig={{ kubeconfig }}
-        apply -f /etc/rancher/k3s/argocd-application.yaml
-      register: argocd_app
-      changed_when: "'unchanged' not in argocd_app.stdout"
+        apply -f /etc/rancher/k3s/argocd-applications.yaml
+      register: argocd_apps_apply
+      changed_when: "'unchanged' not in argocd_apps_apply.stdout"

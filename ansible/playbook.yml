@@ -66,10 +66,13 @@
     # 付与するlast-applied-configurationアノテーションがKubernetesのアノテーション
     # 上限(256KiB)を超えて失敗する。--server-sideはこのアノテーションを使わない
     # ので回避できる(ArgoCD公式インストール手順でも推奨されている方式)。
+    # --force-conflictsは、この修正より前に一度client-side applyで部分的に
+    # 作成されてしまった環境でのフィールド所有権競合を解消するために必要
+    # (新規インスタンスでは競合するものが無いため無害)。
     - name: Install ArgoCD
       ansible.builtin.command: >
         /usr/local/bin/kubectl --kubeconfig={{ kubeconfig }}
-        apply --server-side -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+        apply --server-side --force-conflicts -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
       register: argocd_install
       changed_when: "'unchanged' not in argocd_install.stdout"
 

@@ -65,3 +65,17 @@ resource "aws_lb_listener" "https" {
     target_group_arn = aws_lb_target_group.web.arn
   }
 }
+
+# API GatewayのVPC Link専用リスナー。インターネットには公開せず、
+# security_group.tfでVPC LinkのSGからのみ許可している(HTTPで十分、
+# TLS終端は既にAPI Gateway側で行われている)。
+resource "aws_lb_listener" "api_internal" {
+  load_balancer_arn = aws_lb.web.arn
+  port              = 8081
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.web.arn
+  }
+}

@@ -80,11 +80,6 @@ variable "argocd_apps" {
       path      = "manifests/demo-nginx"
       namespace = "default"
     },
-    {
-      name      = "keycloak"
-      path      = "manifests/keycloak"
-      namespace = "keycloak"
-    },
   ]
 }
 

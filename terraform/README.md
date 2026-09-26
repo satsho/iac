@@ -360,52 +360,34 @@ sudo /usr/local/bin/kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml \
 ArgoCDのWeb UIは現時点では外部公開していない(SSM経由のポートフォワードで見る想定)。
 Rancherの導入は後回し(今回はArgoCD単体でのGitOps運用を優先)。
 
-### Step 11: Keycloakの試験導入(認証基盤のトライアル)
+### Step 11: 認証基盤はKeycloakではなくCognitoに一元化(方針転換)
 
-「ホームページに認証をかけたい」の第一歩として、まずKeycloak自体を触ってみるために
-`manifests/keycloak/`をArgoCDの管理対象に追加した(`ansible/playbook.yml`の
-`argocd_apps`リストに`keycloak`エントリを追加)。`start-dev`モード(埋め込みH2、
-再起動でデータは消える)で動かしており、永続化(家のPostgresへの接続)は未対応。
+「ホームページに認証をかけたい」の第一歩として、当初Keycloakを試験導入した
+(`manifests/keycloak/`をArgoCDの管理対象に追加、ALB公開→Tailscale限定公開と
+段階的に変更)。しかしAPI GatewayでJWT認証を試す際に**Keycloakのままでは
+成立しない構造的な問題**に気づき、認証基盤をAmazon Cognitoに一元化した。
 
-当初はALBで`https://keycloak.focus4.net`として世界に公開していたが、「管理コンソールの
-入口そのものが世界中から見える」のは望ましくないため、**ALBには繋がず、Tailscale経由
-でのみ到達可能**にする構成に変更した(下記Step 12)。
+**問題**: API GatewayのJWTオーソライザーは、issuerのJWKS(公開鍵)エンドポイントに
+**AWS側から直接HTTPSでアクセスする**(VPC LinkやTailscale経由ではない)。
+KeycloakをTailscale限定でしか到達できないようにしていたため、AWSがJWKSを
+取得できずJWT検証が成立しなかった。
 
-**構成:**
+**判断**: JWKSエンドポイントだけ限定的に公開する対応も可能だったが、そもそも
+Cognitoに乗り換えれば「AWS内部サービスなので常に到達可能」という理由で
+この問題自体が発生しない。加えてCognitoは無料枠(Essentialsティア、
+最初の10,000 MAUまで無料)で今回の規模なら実質無料、EC2上でKeycloakを
+自分で運用・パッチ管理する手間も無くなるため、Keycloak(`manifests/keycloak/`、
+Ansible側のnamespace/secret作成タスク)を撤去し、Cognitoに一元化した。
 
-```
-Tailscale tailnet(自分のPCも参加済み)
-  └─ EC2(ansible/playbook.ymlがtailscale up)
-       └─ k3s: keycloak Service(NodePort 30090) → keycloak Deployment(start-dev)
-            (http://<EC2のTailscale IP>:30090/ で自分のPCからのみアクセス可能)
-
-ALB(https://focus4.net、変更なし)
-  └─ 従来のdemo-nginx用Target Group
-```
-
-管理者パスワードはpublicリポジトリにコミットしたくないため、GitOpsの管理対象からは
-意図的に外し、`ansible/playbook.yml`が起動ごとに乱数生成して`kubectl create secret`
-で直接投入している(`/root/keycloak-admin-credentials.txt`にも保存、SSM経由で確認)。
-
-**動作確認**:
-
-```bash
-# SSM Session Manager経由でインスタンスに接続し、Tailscale IPと管理者パスワードを確認
-aws ssm start-session --target <instance_id>
-tailscale ip -4
-sudo cat /root/keycloak-admin-credentials.txt
-
-# 自分のPC(同じtailnetに参加済み)のブラウザでアクセス
-open http://<上で確認したTailscale IP>:30090/
-```
-
-次のステップ(未実装): 家のサーバのPostgresへの接続(同じくTailscale経由)でデータを
-永続化、`oauth2-proxy`をnginxの前段に挟んでKeycloakでログインさせる構成。
+ArgoCD SSOや将来のホームページログイン(oauth2-proxy等)も、今後はCognitoを
+IdPとして使う想定に変更している。
 
 ### Step 12: TailscaleによるプライベートネットワークへのEC2参加
 
-Keycloakを世界に公開せず、自分のPCからだけアクセスできるようにするため、
-`ansible/playbook.yml`でEC2をTailscaleのtailnetに参加させている。
+Keycloakを世界に公開せず自分のPCからだけアクセスできるようにする目的で導入したが、
+Keycloak自体はStep 11の判断でCognitoに置き換えた。Tailscale参加の仕組み自体は
+汎用的な「EC2にプライベートアクセスする手段」として`ansible/playbook.yml`に残しており、
+将来k3s上の別サービスに使ったり、家のサーバとの接続に転用する想定。
 
 - auth keyはTailscale管理コンソール(Settings → Keys)で**Reusable**を指定して発行
   (`user_data_replace_on_change`によりdevスタックのdestroy/apply毎にインスタンスが
@@ -417,20 +399,72 @@ Keycloakを世界に公開せず、自分のPCからだけアクセスできる�
 
 Tailscale自体はAWS Security Groupを経由しない(WireGuardのUDPトンネル内で
 折り返すため、NodePortへのアクセスはAWS側のインバウンドルールの対象外)。
-そのためKeycloakのNodePort用のSecurity GroupルールもALB向けには不要になった。
 
 **MagicDNSでIPアドレスを覚えずにアクセスする:**
 
 `tailscale up`のホスト名は固定値`iac-poc-dev`を指定している(OSのホスト名は
 プライベートIP由来でインスタンス作り直しごとに変わるため、固定しないとMagicDNS名も
 毎回変わってしまう)。Tailscale管理コンソール(https://login.tailscale.com/admin/dns)
-でMagicDNSを有効にすれば、tailnetに参加している端末からは`http://iac-poc-dev.<tailnet名>.ts.net:30090/`
+でMagicDNSを有効にすれば、tailnetに参加している端末からは`http://iac-poc-dev.<tailnet名>.ts.net:<ポート>/`
 でアクセスできるようになる(IPアドレスを都度確認する必要がなくなる)。
 
 なお、devスタックのdestroy/apply毎に新しいインスタンスが同じホスト名で参加しようとするため、
 古いインスタンス分のTailscale側デバイス登録が消えずに残り続ける(名前が重複した場合は
 `iac-poc-dev-1`のように連番が振られる)。気になる場合は、auth key発行時に**Ephemeral**も
 有効にしておくと、インスタンス終了時にTailscale側のデバイス登録も自動的に消える。
+
+### Step 13: API Gateway + Cognito(JWT認証)+ VPC Link
+
+マイクロサービス構成でのAPI認証を試すため、API Gateway(HTTP API)にCognitoの
+JWTオーソライザーを設定し、VPC Link経由でALB → k3s(demo-nginx)へ転送する構成を追加した。
+
+**構成:**
+
+```
+クライアント → (Cognitoにログイン、JWT取得)
+             → API Gateway(JWTオーソライザーがCognitoのトークンを検証)
+                  issuer:   https://cognito-idp.<region>.amazonaws.com/<user_pool_id>
+                  audience: <user_pool_client_id>
+             → VPC Link(ENIはaws_security_group.vpc_linkのみ、インバウンド無し)
+             → ALBの内部限定リスナー(8081番、vpc_linkのSGからのみ許可、
+                                       インターネットには公開していない)
+             → 既存のdemo-nginx用Target Group
+```
+
+既存のpublic ALB(443番、`https://focus4.net`)はそのまま維持しつつ、
+同じALBに8081番の内部限定リスナーを追加する形にした(専用の内部ALBを
+新規作成すると固定費が追加でかかるため、既存ALBの使い回しを優先)。
+
+**動作確認**:
+
+```bash
+# 1. Cognitoにテストユーザーを作成(初回のみ、コンソールかCLIで)
+aws cognito-idp admin-create-user \
+  --user-pool-id <cognito_user_pool_id> \
+  --username testuser \
+  --temporary-password 'TempPass123!' \
+  --message-action SUPPRESS
+
+aws cognito-idp admin-set-user-password \
+  --user-pool-id <cognito_user_pool_id> \
+  --username testuser \
+  --password 'RealPass123!' \
+  --permanent
+
+# 2. JWTを取得
+aws cognito-idp initiate-auth \
+  --client-id <cognito_user_pool_client_id> \
+  --auth-flow USER_PASSWORD_AUTH \
+  --auth-parameters USERNAME=testuser,PASSWORD='RealPass123!'
+# レスポンスのAuthenticationResult.IdToken(またはAccessToken)を使う
+
+# 3. トークン無しで叩く → 401
+curl -i "$(terraform output -raw api_gateway_url)"
+
+# 4. トークン付きで叩く → demo-nginxのレスポンスが返る
+curl -i "$(terraform output -raw api_gateway_url)" \
+  -H "Authorization: Bearer <取得したトークン>"
+```
 
 ## CloudFormation Git Sync(`iac-terraform-role` スタックの自動反映)
 

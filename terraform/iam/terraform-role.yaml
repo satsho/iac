@@ -122,6 +122,16 @@ Resources:
                 Action:
                   - acm:*
                 Resource: '*'
+              - Sid: CognitoBroad
+                Effect: Allow
+                Action:
+                  - cognito-idp:*
+                Resource: '*'
+              - Sid: ApiGatewayBroad
+                Effect: Allow
+                Action:
+                  - apigateway:*
+                Resource: '*'
 
 Outputs:
   RoleArn:

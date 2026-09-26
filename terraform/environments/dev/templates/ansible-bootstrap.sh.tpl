@@ -28,7 +28,8 @@ cat <<EOT > /etc/ansible/extra-vars.json
 {
   "argocd_repo_url": "${argocd_repo_url}",
   "argocd_repo_revision": "${argocd_repo_revision}",
-  "argocd_apps": ${jsonencode(argocd_apps)}
+  "argocd_apps": ${jsonencode(argocd_apps)},
+  "tailscale_auth_key": "${tailscale_auth_key}"
 }
 EOT
 chmod 600 /etc/ansible/extra-vars.json

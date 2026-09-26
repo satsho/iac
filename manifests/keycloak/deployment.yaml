@@ -32,10 +32,6 @@ spec:
                 secretKeyRef:
                   name: keycloak-admin
                   key: password
-            - name: KC_HOSTNAME
-              value: "keycloak.focus4.net"
-            - name: KC_PROXY_HEADERS
-              value: "xforwarded"
           ports:
             - containerPort: 8080
           readinessProbe:

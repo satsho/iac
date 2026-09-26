@@ -35,6 +35,7 @@ resource "aws_instance" "k3s" {
     argocd_repo_url       = var.argocd_repo_url
     argocd_repo_revision  = var.argocd_repo_revision
     argocd_apps           = var.argocd_apps
+    tailscale_auth_key    = var.tailscale_auth_key
   })
 
   tags = {

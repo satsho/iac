@@ -21,6 +21,7 @@ env:
   TF_VAR_rhel_org_id: ${{ secrets.RHEL_ORG_ID }}
   TF_VAR_rhel_activation_key: ${{ secrets.RHEL_ACTIVATION_KEY }}
   TF_VAR_rhel_ami_id: ${{ vars.RHEL_AMI_ID }}
+  TF_VAR_tailscale_auth_key: ${{ secrets.TAILSCALE_AUTH_KEY }}
 
 jobs:
   terraform:

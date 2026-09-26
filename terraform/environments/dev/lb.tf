@@ -36,50 +36,6 @@ resource "aws_lb_target_group_attachment" "web" {
   port             = var.web_node_port
 }
 
-resource "aws_lb_target_group" "keycloak" {
-  name        = "${var.project_name}-keycloak-tg"
-  port        = var.keycloak_node_port
-  protocol    = "HTTP"
-  vpc_id      = module.network.vpc_id
-  target_type = "instance"
-
-  health_check {
-    path                = "/"
-    matcher             = "200-399"
-    interval            = 15
-    healthy_threshold   = 2
-    unhealthy_threshold = 3
-  }
-
-  tags = {
-    Name = "${var.project_name}-keycloak-tg"
-  }
-}
-
-resource "aws_lb_target_group_attachment" "keycloak" {
-  target_group_arn = aws_lb_target_group.keycloak.arn
-  target_id        = aws_instance.k3s.id
-  port             = var.keycloak_node_port
-}
-
-# keycloak.<domain>宛のリクエストだけをKeycloakのターゲットグループへ転送する。
-# それ以外(デフォルト)はhttpsリスナーのdefault_action(demo-nginx)のまま。
-resource "aws_lb_listener_rule" "keycloak" {
-  listener_arn = aws_lb_listener.https.arn
-  priority     = 10
-
-  action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.keycloak.arn
-  }
-
-  condition {
-    host_header {
-      values = ["keycloak.${var.domain_name}"]
-    }
-  }
-}
-
 # HTTPは常にHTTPSへリダイレクトし、直接forwardはしない。
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.web.arn

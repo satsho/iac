@@ -360,6 +360,43 @@ sudo /usr/local/bin/kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml \
 ArgoCDのWeb UIは現時点では外部公開していない(SSM経由のポートフォワードで見る想定)。
 Rancherの導入は後回し(今回はArgoCD単体でのGitOps運用を優先)。
 
+### Step 11: Keycloakの試験導入(認証基盤のトライアル)
+
+「ホームページに認証をかけたい」の第一歩として、まずKeycloak自体を触ってみるために
+`manifests/keycloak/`をArgoCDの管理対象に追加した(`ansible/playbook.yml`の
+`argocd_apps`リストに`keycloak`エントリを追加)。`start-dev`モード(埋め込みH2、
+再起動でデータは消える)で動かしており、永続化(家のPostgresへの接続)は未対応。
+
+**構成:**
+
+```
+ALB(https://keycloak.focus4.net) ── ACM証明書はfocus4.netのSANとして追加
+  └─ aws_lb_listener_rule(host_headerで振り分け)
+       └─ Target Group(keycloak_node_port=30090)
+            └─ k3s: keycloak Service(NodePort) → keycloak Deployment(start-dev)
+
+ALB(https://focus4.net、変更なし)
+  └─ 従来のdemo-nginx用Target Group
+```
+
+管理者パスワードはpublicリポジトリにコミットしたくないため、GitOpsの管理対象からは
+意図的に外し、`ansible/playbook.yml`が起動ごとに乱数生成して`kubectl create secret`
+で直接投入している(`/root/keycloak-admin-credentials.txt`にも保存、SSM経由で確認)。
+
+**動作確認**:
+
+```bash
+# ブラウザで管理コンソールにアクセス
+open https://keycloak.focus4.net/
+
+# 管理者パスワードの確認(SSM Session Manager経由)
+aws ssm start-session --target <instance_id>
+sudo cat /root/keycloak-admin-credentials.txt
+```
+
+次のステップ(未実装): 家のサーバのPostgresへの接続(Tailscale経由)でデータを永続化、
+`oauth2-proxy`をnginxの前段に挟んでKeycloakでログインさせる構成。
+
 ## CloudFormation Git Sync(`iac-terraform-role` スタックの自動反映)
 
 Step 2のIAMロール(`iac-terraform-role`スタック)は、権限不足エラーが出るたびに

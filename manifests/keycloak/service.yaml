@@ -1,0 +1,15 @@
+# nodePortはterraform/environments/dev側のvar.keycloak_node_port(デフォルト30090)と
+# 値を一致させること。ALBのターゲットグループがこのポートに転送している。
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  namespace: keycloak
+spec:
+  type: NodePort
+  selector:
+    app: keycloak
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30090

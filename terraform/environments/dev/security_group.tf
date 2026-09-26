@@ -26,6 +26,16 @@ resource "aws_security_group_rule" "instance_from_alb" {
   description              = "Web app NodePort from the ALB only"
 }
 
+resource "aws_security_group_rule" "instance_from_alb_keycloak" {
+  type                     = "ingress"
+  from_port                = var.keycloak_node_port
+  to_port                  = var.keycloak_node_port
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.instance.id
+  source_security_group_id = aws_security_group.alb.id
+  description              = "Keycloak NodePort from the ALB only"
+}
+
 resource "aws_security_group" "alb" {
   name        = "${var.project_name}-alb-sg"
   description = "Public ALB, HTTP from the internet"

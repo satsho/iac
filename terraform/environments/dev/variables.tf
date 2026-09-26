@@ -61,16 +61,37 @@ variable "argocd_repo_url" {
   default     = "https://github.com/satsho/iac.git"
 }
 
-variable "argocd_repo_path" {
-  description = "argocd_repo_url内の、ArgoCDが同期するマニフェストのパス"
-  type        = string
-  default     = "manifests/demo-nginx"
-}
-
 variable "argocd_repo_revision" {
   description = "argocd_repo_urlのうち、ArgoCDが追従するブランチ"
   type        = string
   default     = "main"
+}
+
+variable "argocd_apps" {
+  description = "ArgoCDに登録するApplicationの一覧。pathはargocd_repo_url内のパス、namespaceは同期先(存在しなければCreateNamespace=trueで作成される)"
+  type = list(object({
+    name      = string
+    path      = string
+    namespace = string
+  }))
+  default = [
+    {
+      name      = "demo-nginx"
+      path      = "manifests/demo-nginx"
+      namespace = "default"
+    },
+    {
+      name      = "keycloak"
+      path      = "manifests/keycloak"
+      namespace = "keycloak"
+    },
+  ]
+}
+
+variable "keycloak_node_port" {
+  description = "KeycloakのNodePort番号。ALBのターゲットグループもこのポートに転送する。manifests/keycloak/service.yamlのnodePortと値を一致させること"
+  type        = number
+  default     = 30090
 }
 
 variable "rhel_ami_id" {

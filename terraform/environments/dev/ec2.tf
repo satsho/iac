@@ -33,8 +33,8 @@ resource "aws_instance" "k3s" {
     ansible_repo_url      = var.ansible_repo_url
     ansible_repo_revision = var.ansible_repo_revision
     argocd_repo_url       = var.argocd_repo_url
-    argocd_repo_path      = var.argocd_repo_path
     argocd_repo_revision  = var.argocd_repo_revision
+    argocd_apps           = var.argocd_apps
   })
 
   tags = {

@@ -1,6 +1,6 @@
-# nodePortはterraform/environments/dev側のvar.keycloak_node_port(デフォルト30090)と
-# 値を一致させること。ALBには繋いでおらず、Tailscale経由でこのポートに
-# 直接アクセスする(http://<ノードのTailscale IP>:30090/)。
+# ALBには繋いでおらず、Tailscale経由でこのポートに直接アクセスする
+# (http://<ノードのTailscale IP>:30090/)。nodePortの値を変える場合は
+# ここだけ変更すればよい(Terraform側からは参照していない)。
 apiVersion: v1
 kind: Service
 metadata:

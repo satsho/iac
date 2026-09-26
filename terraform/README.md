@@ -417,7 +417,7 @@ Keycloakを世界に公開せず、自分のPCからだけアクセスできる�
 
 Tailscale自体はAWS Security Groupを経由しない(WireGuardのUDPトンネル内で
 折り返すため、NodePortへのアクセスはAWS側のインバウンドルールの対象外)。
-そのため`keycloak_node_port`用のSecurity GroupルールもALB向けには不要になった。
+そのためKeycloakのNodePort用のSecurity GroupルールもALB向けには不要になった。
 
 ## CloudFormation Git Sync(`iac-terraform-role` スタックの自動反映)
 

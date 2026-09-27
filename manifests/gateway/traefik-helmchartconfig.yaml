@@ -1,0 +1,18 @@
+# k3s標準のTraefik(HelmChart経由でインストールされる)にGateway APIプロバイダを
+# 追加で有効化する。HelmChartConfigはk3sのHelm Controllerが検知して、
+# 既存のtraefik HelmChartにこの内容をマージ適用する。
+# 前提: Gateway API本体のCRDは別途インストールしておくこと(このリポジトリの
+# 管理対象外。upstreamのリリースを直接apply):
+#   kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.1.0/standard-install.yaml
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    providers:
+      kubernetesGateway:
+        enabled: true
+    gateway:
+      enabled: true

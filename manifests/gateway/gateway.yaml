@@ -13,3 +13,8 @@ spec:
     - name: web
       port: 8000
       protocol: HTTP
+      # デフォルト(Same)だとGatewayと同じnamespace(default)のHTTPRouteしか
+      # 紐付けられない。keycloak namespaceのHTTPRouteも使うためAllにする。
+      allowedRoutes:
+        namespaces:
+          from: All

@@ -1,0 +1,20 @@
+# /keycloak配下をKeycloakへ振り分ける。Keycloak側もKC_HTTP_RELATIVE_PATH=/keycloakで
+# 同じプレフィックスを認識している(manifests/keycloak/deployment.yaml参照)。
+# HTTPRoute自体はkeycloak Serviceと同じnamespaceに置く(ReferenceGrant不要)。
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: keycloak
+  namespace: keycloak
+spec:
+  parentRefs:
+    - name: traefik-gateway
+      namespace: default
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /keycloak
+      backendRefs:
+        - name: keycloak
+          port: 8080

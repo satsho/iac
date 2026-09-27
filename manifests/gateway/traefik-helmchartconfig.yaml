@@ -16,3 +16,12 @@ spec:
         enabled: true
     gateway:
       enabled: true
+    # デバッグ用。api.insecureはTraefik管理API/ダッシュボードを認証無しで
+    # 有効化する(entryPoint "traefik"=8080番、外部には公開されておらず
+    # port-forward経由でのみ到達可能なので自宅環境では実害は小さい)。
+    # accessLogでリクエスト単位のログを出す。
+    api:
+      insecure: true
+    logs:
+      access:
+        enabled: true

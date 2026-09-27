@@ -1,3 +1,7 @@
+# portはk3s標準Traefikの"web"エントリーポイントの実ポート(コンテナ内部の8000番)を
+# 指定する。80番はService側で8000番に変換された後の外部公開ポートなので、
+# ここに書いてもTraefikのGateway APIプロバイダはエントリーポイントを見つけられない
+# ("Cannot find entryPoint for Gateway: no matching entryPoint for port 80")。
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
@@ -7,5 +11,5 @@ spec:
   gatewayClassName: traefik
   listeners:
     - name: web
-      port: 80
+      port: 8000
       protocol: HTTP

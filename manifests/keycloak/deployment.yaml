@@ -35,6 +35,10 @@ spec:
                 secretKeyRef:
                   name: keycloak-admin
                   key: password
+            # Gateway APIのHTTPRouteで/keycloakパス配下に振り分けるため、
+            # Keycloak自身にもこのプレフィックスを教えておく(内部リンク生成用)。
+            - name: KC_HTTP_RELATIVE_PATH
+              value: /keycloak
           ports:
             - containerPort: 8080
           readinessProbe:

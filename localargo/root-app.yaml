@@ -1,0 +1,22 @@
+# App of Apps: 自宅サーバのArgoCDに一度だけ手動でapplyする。
+# 以降はlocalargo/apps/配下の追加・変更をArgoCDが自動的に検知して同期する。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root-app
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/satsho/iac.git
+    targetRevision: main
+    path: localargo/apps
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

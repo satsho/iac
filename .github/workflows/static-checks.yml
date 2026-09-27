@@ -6,6 +6,8 @@ on:
       - "terraform/**"
       - "packer/**"
       - "ansible/**"
+      - "manifests/**"
+      - "localargo/**"
       - ".github/workflows/static-checks.yml"
   push:
     branches:
@@ -14,6 +16,8 @@ on:
       - "terraform/**"
       - "packer/**"
       - "ansible/**"
+      - "manifests/**"
+      - "localargo/**"
 
 permissions:
   contents: read
@@ -106,3 +110,18 @@ jobs:
         run: |
           packer init al2023-nginx.pkr.hcl
           packer validate al2023-nginx.pkr.hcl
+
+  manifests-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz \
+            | tar -xz -C /usr/local/bin kubeconform
+
+      # ArgoCD ApplicationのようなCRDはスキーマが手元にないのでignore-missing-schemasで
+      # スキップし、Deployment/Serviceなど組み込みリソースの構文・スキーマのみ検証する。
+      - name: Validate Kubernetes manifests
+        run: kubeconform -strict -ignore-missing-schemas -summary manifests localargo

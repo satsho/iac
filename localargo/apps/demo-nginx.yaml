@@ -1,0 +1,21 @@
+# 動作確認用。AWS dev環境と同じmanifests/demo-nginxを自宅サーバにも同期する。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: demo-nginx
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/satsho/iac.git
+    targetRevision: main
+    path: manifests/demo-nginx
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

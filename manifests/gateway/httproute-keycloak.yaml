@@ -7,6 +7,8 @@ metadata:
   name: keycloak
   namespace: keycloak
 spec:
+  hostnames:
+    - keycloak.focus4.net
   parentRefs:
     - name: traefik-gateway
       namespace: default

@@ -11,14 +11,14 @@ metadata:
 spec:
   acme:
     server: https://acme-v02.api.letsencrypt.org/directory
-    email: "<Let's Encryptの更新通知を受け取るメールアドレスに置き換え>"
+    email: "emeth.meth0307@gmail.com"
     privateKeySecretRef:
       name: letsencrypt-route53-account-key
     solvers:
       - dns01:
           route53:
             region: ap-northeast-1
-            accessKeyID: "<cert_manager_access_key_idの値に置き換え>"
+            accessKeyID: "AKIAYGOQBNHFB4EHUTH5"
             secretAccessKeySecretRef:
               name: route53-credentials
               key: secret-access-key

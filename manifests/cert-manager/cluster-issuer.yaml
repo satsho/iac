@@ -1,0 +1,24 @@
+# route53-credentialsシークレットはGitOpsの管理対象外(手動でkubectl作成)。
+# 事前にterraform/environments/dnsのoutput(cert_manager_access_key_id /
+# cert_manager_secret_access_key)を使って作成しておくこと:
+#   kubectl create namespace cert-manager --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl create secret generic route53-credentials -n cert-manager \
+#     --from-literal=secret-access-key='<terraform outputの値>'
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-route53
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: "<Let's Encryptの更新通知を受け取るメールアドレスに置き換え>"
+    privateKeySecretRef:
+      name: letsencrypt-route53-account-key
+    solvers:
+      - dns01:
+          route53:
+            region: ap-northeast-1
+            accessKeyID: "<cert_manager_access_key_idの値に置き換え>"
+            secretAccessKeySecretRef:
+              name: route53-credentials
+              key: secret-access-key

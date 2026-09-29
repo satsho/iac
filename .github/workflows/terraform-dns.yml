@@ -18,6 +18,7 @@ permissions:
 
 env:
   TF_WORKING_DIR: terraform/environments/dns
+  TF_VAR_tailscale_home_ip: ${{ vars.TAILSCALE_HOME_IP }}
 
 jobs:
   terraform:

@@ -15,3 +15,8 @@ variable "domain_name" {
   type        = string
   default     = "focus4.net"
 }
+
+variable "tailscale_home_ip" {
+  description = "自宅k3sサーバのTailscale IP(100.x.y.z)。tailscale up後にtailscale ip -4で取得する"
+  type        = string
+}

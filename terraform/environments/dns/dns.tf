@@ -21,3 +21,15 @@ resource "aws_route53_zone" "main" {
     Name = "${var.project_name}-zone"
   }
 }
+
+# 自宅k3sサーバのTailscale IPを指す。パブリックDNS名だが、実際に到達できるのは
+# 同じtailnetに参加しているデバイスだけ(100.64.0.0/10はTailscale以外からは
+# 経路が無いため)。Google OAuthのリダイレクトURI登録などhttpsのドメイン名が
+# 必要な場面でも、実際の到達性はTailscale経由に限定できる。
+resource "aws_route53_record" "keycloak_tailscale" {
+  zone_id = aws_route53_zone.main.zone_id
+  name    = "keycloak.${var.domain_name}"
+  type    = "A"
+  ttl     = 300
+  records = [var.tailscale_home_ip]
+}

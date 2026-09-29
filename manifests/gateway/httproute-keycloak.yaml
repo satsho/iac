@@ -1,5 +1,6 @@
-# /keycloak配下をKeycloakへ振り分ける。Keycloak側もKC_HTTP_RELATIVE_PATH=/keycloakで
-# 同じプレフィックスを認識している(manifests/keycloak/deployment.yaml参照)。
+# keycloak.focus4.netのホスト名を丸ごとKeycloakに割り当てる(ルート/でログイン画面へ)。
+# パスプレフィックスは使わない(Keycloak側もKC_HTTP_RELATIVE_PATHを設定しない、
+# manifests/keycloak/deployment.yaml参照)。
 # HTTPRoute自体はkeycloak Serviceと同じnamespaceに置く(ReferenceGrant不要)。
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -16,7 +17,7 @@ spec:
     - matches:
         - path:
             type: PathPrefix
-            value: /keycloak
+            value: /
       backendRefs:
         - name: keycloak
           port: 8080

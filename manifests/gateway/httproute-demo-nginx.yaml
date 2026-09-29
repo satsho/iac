@@ -6,6 +6,8 @@ metadata:
   name: demo-nginx
   namespace: default
 spec:
+  hostnames:
+    - demo.focus4.net
   parentRefs:
     - name: traefik-gateway
   rules:

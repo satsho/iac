@@ -14,3 +14,8 @@ output "cert_manager_secret_access_key" {
   value     = aws_iam_access_key.cert_manager.secret
   sensitive = true
 }
+
+output "ssm_hybrid_activation_role_name" {
+  description = "aws ssm create-activation --iam-role に渡すロール名"
+  value       = aws_iam_role.ssm_hybrid_activation.name
+}

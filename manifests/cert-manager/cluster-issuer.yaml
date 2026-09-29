@@ -1,9 +1,12 @@
-# route53-credentialsシークレットはGitOpsの管理対象外(手動でkubectl作成)。
-# 事前にterraform/environments/dnsのoutput(cert_manager_access_key_id /
-# cert_manager_secret_access_key)を使って作成しておくこと:
-#   kubectl create namespace cert-manager --dry-run=client -o yaml | kubectl apply -f -
-#   kubectl create secret generic route53-credentials -n cert-manager \
-#     --from-literal=secret-access-key='<terraform outputの値>'
+# Route53認証はambient credentials方式(SSM Hybrid Activation由来の一時
+# クレデンシャル)に移行済み。accessKeyID/secretAccessKeySecretRefをあえて
+# 書かないことで、cert-managerはAWS SDK標準の認証チェーン(環境変数/
+# 共有クレデンシャルファイル)にフォールバックする。ClusterIssuerはデフォルトで
+# ambient credentialsが有効(Issuerだと--issuer-ambient-credentials=trueが
+# 別途必要)。
+#
+# 実際にファイルを供給する仕組みは aws-credentials-sync-cronjob.yaml と、
+# 手動で一度だけ当てるcert-manager Deploymentへのパッチ(README参照)。
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
@@ -18,7 +21,3 @@ spec:
       - dns01:
           route53:
             region: ap-northeast-1
-            accessKeyID: "AKIAYGOQBNHFB4EHUTH5"
-            secretAccessKeySecretRef:
-              name: route53-credentials
-              key: secret-access-key

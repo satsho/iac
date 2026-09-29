@@ -18,3 +18,16 @@ spec:
       allowedRoutes:
         namespaces:
           from: All
+    # websecureエントリーポイントの実ポート(コンテナ内部の8443番、"web"と同じ
+    # +8000オフセットの命名規則)。cert-managerが発行したSecretをTLS終端に使う。
+    - name: websecure
+      port: 8443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: keycloak-focus4-net-tls
+      allowedRoutes:
+        namespaces:
+          from: All

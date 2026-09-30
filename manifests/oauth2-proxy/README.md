@@ -20,10 +20,13 @@ OIDCプロバイダとして使うリバースプロキシとしてdemo-nginxの
 ## Secretの作成(手動、一度だけ)
 
 `client-secret`はKeycloakの`oauth2-proxy`クライアントの Credentials タブに
-表示される値。`cookie-secret`はランダムな32バイトを生成する。
+表示される値。`cookie-secret`はランダムな32バイトをURL-safeなbase64で生成する
+(oauth2-proxyは標準base64の`+`/`/`を含む文字列だとデコードに失敗し、生の文字列長
+として扱ってしまい`cookie_secret must be 16, 24, or 32 bytes`エラーになるため、
+`tr`でURL-safeな文字に変換する)。
 
 ```bash
 kubectl create secret generic oauth2-proxy-secrets -n default \
   --from-literal=client-secret='<Keycloakのoauth2-proxyクライアントのClient secret>' \
-  --from-literal=cookie-secret="$(openssl rand -base64 32)"
+  --from-literal=cookie-secret="$(openssl rand -base64 32 | tr '+/' '-_')"
 ```

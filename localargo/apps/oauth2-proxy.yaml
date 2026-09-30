@@ -1,0 +1,21 @@
+# oauth2-proxy-secrets シークレットを事前に作成しておくこと(manifests/oauth2-proxy/README.md参照)。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: oauth2-proxy
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/satsho/iac.git
+    targetRevision: main
+    path: manifests/oauth2-proxy
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

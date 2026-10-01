@@ -39,6 +39,11 @@ spec:
               value: http://demo-nginx.default.svc.cluster.local:80
             - name: OAUTH2_PROXY_EMAIL_DOMAINS
               value: "*"
+            # KeycloakがGoogleをブローカーした際にemail_verifiedをtrueで
+            # 引き継がないことがあり、デフォルトだとoauth2-proxyがid_tokenを
+            # 拒否してしまう(Googleアカウント自体のメールは当然検証済み)。
+            - name: OAUTH2_PROXY_INSECURE_OIDC_ALLOW_UNVERIFIED_EMAIL
+              value: "true"
             # TraefikがTLSを終端し内部へは平文HTTPで転送するため、外部から見た
             # スキーム/ホスト名をX-Forwarded-*ヘッダーから正しく認識させる。
             - name: OAUTH2_PROXY_REVERSE_PROXY

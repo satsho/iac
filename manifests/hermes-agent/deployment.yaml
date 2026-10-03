@@ -1,0 +1,85 @@
+# 第1段階: 自宅ネットワーク内(Tailscale経由)のみで動作確認する構成。
+# 認証(Keycloak/oauth2-proxy)やインターネット公開は、動作確認が取れてから追加する。
+#
+# まずWebダッシュボードを起動する(hermes dashboard --host 0.0.0.0)。
+# 0.0.0.0など非ループバックアドレスへのバインドはBasic認証が必須という仕様
+# なので、GOOGLE_API_KEYとは別にBasic認証のSecretも事前に作る必要がある:
+#   kubectl create namespace hermes
+#   kubectl create secret generic hermes-agent-secrets -n hermes \
+#     --from-literal=GOOGLE_API_KEY='<任意、後からダッシュボードでも入力可>' \
+#     --from-literal=dashboard-username='admin' \
+#     --from-literal=dashboard-password="$(openssl rand -base64 18)" \
+#     --from-literal=dashboard-secret="$(openssl rand -base64 32)"
+#
+# (パスワードは控えておくこと: kubectl get secret hermes-agent-secrets -n hermes
+#  -o jsonpath='{.data.dashboard-password}' | base64 -d; echo )
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hermes-agent
+  namespace: hermes
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: hermes-agent
+  template:
+    metadata:
+      labels:
+        app: hermes-agent
+    spec:
+      containers:
+        - name: hermes
+          image: nousresearch/hermes-agent:v2026.9.24
+          args:
+            - dashboard
+            - --host
+            - 0.0.0.0
+            - --port
+            - "9119"
+            - --no-open
+          env:
+            - name: GOOGLE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-agent-secrets
+                  key: GOOGLE_API_KEY
+                  optional: true
+            - name: HERMES_DASHBOARD_BASIC_AUTH_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-agent-secrets
+                  key: dashboard-username
+            - name: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-agent-secrets
+                  key: dashboard-password
+            - name: HERMES_DASHBOARD_BASIC_AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-agent-secrets
+                  key: dashboard-secret
+          ports:
+            - name: dashboard
+              containerPort: 9119
+          volumeMounts:
+            - name: hermes-data
+              mountPath: /opt/data
+          readinessProbe:
+            tcpSocket:
+              port: 9119
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              memory: "2Gi"
+      volumes:
+        - name: hermes-data
+          persistentVolumeClaim:
+            claimName: hermes-agent-data

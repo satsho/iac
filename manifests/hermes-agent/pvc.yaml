@@ -1,0 +1,13 @@
+# 会話履歴・記憶・スキルなどの永続化(/opt/data)。
+# k3s標準のlocal-path provisionerを使う(storageClassNameは指定しない=デフォルト)。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: hermes-agent-data
+  namespace: hermes
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi

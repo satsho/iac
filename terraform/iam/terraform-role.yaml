@@ -132,6 +132,13 @@ Resources:
                 Action:
                   - apigateway:*
                 Resource: '*'
+              # Hermes Agentのバックアップ用S3バケットなど、tfstate以外のS3
+              # リソースもTerraformで作るようになったため追加。
+              - Sid: S3Broad
+                Effect: Allow
+                Action:
+                  - s3:*
+                Resource: '*'
 
 Outputs:
   RoleArn:

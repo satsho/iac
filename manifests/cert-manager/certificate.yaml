@@ -8,6 +8,7 @@ spec:
   dnsNames:
     - keycloak.focus4.net
     - demo.focus4.net
+    - hermes.focus4.net
   issuerRef:
     name: letsencrypt-route53
     kind: ClusterIssuer

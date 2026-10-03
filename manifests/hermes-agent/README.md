@@ -45,3 +45,19 @@ http://<TailscaleのIP>:30119
 ユーザー名`admin`、上記で確認したパスワードでBasic認証を通過すると、
 ダッシュボードの「API Keys」画面からGoogle Gemini(`GOOGLE_API_KEY`または
 `GEMINI_API_KEY`)を入力し、使用モデルを選択できる。
+
+## バックアップ
+
+`/opt/data`(記憶・スキル・セッション)は失うと学習内容がリセットされてしまう
+ので、`backup-cronjob.yaml`で毎日S3(`iac-poc-hermes-backups`)へtar.gzを
+アップロードしている。認証はSSM Hybrid Activationの一時クレデンシャルを
+hostPathでそのまま使うので、追加のSecret作成は不要。
+
+復元する場合(手動):
+
+```bash
+aws s3 cp s3://iac-poc-hermes-backups/hermes-agent/hermes-<日時>.tar.gz .
+kubectl cp hermes-<日時>.tar.gz hermes/<hermes-agent Podの名前>:/tmp/restore.tar.gz
+kubectl exec -it -n hermes deployment/hermes-agent -- \
+  sh -c "cd /opt/data && tar -xzf /tmp/restore.tar.gz"
+```

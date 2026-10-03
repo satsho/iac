@@ -19,3 +19,7 @@ output "ssm_hybrid_activation_role_name" {
   description = "aws ssm create-activation --iam-role に渡すロール名"
   value       = aws_iam_role.ssm_hybrid_activation.name
 }
+
+output "hermes_backups_bucket" {
+  value = aws_s3_bucket.hermes_backups.bucket
+}

@@ -43,3 +43,13 @@ resource "aws_route53_record" "demo_tailscale" {
   ttl     = 300
   records = [var.tailscale_home_ip]
 }
+
+# Hermes Agentダッシュボードも同じホスト上のGatewayで受けているため、
+# 同じTailscale IPを指す。
+resource "aws_route53_record" "hermes_tailscale" {
+  zone_id = aws_route53_zone.main.zone_id
+  name    = "hermes.${var.domain_name}"
+  type    = "A"
+  ttl     = 300
+  records = [var.tailscale_home_ip]
+}

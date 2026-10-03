@@ -1,0 +1,57 @@
+# Hermes Agentの永続データ(/opt/data、記憶・スキル・セッション)を日次でS3に
+# バックアップする。失うと学習内容がリセットされてしまうデータなので。
+#
+# 認証はSSM Hybrid Activationの一時クレデンシャル(/root/.aws/credentials、
+# ホスト上でSSM Agentが自動更新)をそのままhostPathでマウントして使う
+# (cert-managerの時のようなSecret同期CronJobは不要。このCronJob自体は
+# フルGitOps管理なので、直接hostPathを指定できる)。
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: hermes-agent-backup
+  namespace: hermes
+spec:
+  schedule: "0 18 * * *" # 毎日 日本時間3時(UTC 18時)
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: amazon/aws-cli:2.27.0
+              env:
+                - name: AWS_SHARED_CREDENTIALS_FILE
+                  value: /host-aws/credentials
+                - name: AWS_REGION
+                  value: ap-northeast-1
+                - name: S3_BUCKET
+                  value: iac-poc-hermes-backups
+              volumeMounts:
+                - name: hermes-data
+                  mountPath: /opt/data
+                  readOnly: true
+                - name: host-aws-creds
+                  mountPath: /host-aws
+                  readOnly: true
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  DATE=$(date +%Y%m%d-%H%M%S)
+                  tar -czf "/tmp/hermes-${DATE}.tar.gz" -C /opt/data .
+                  aws s3 cp "/tmp/hermes-${DATE}.tar.gz" \
+                    "s3://${S3_BUCKET}/hermes-agent/hermes-${DATE}.tar.gz"
+          volumes:
+            - name: hermes-data
+              persistentVolumeClaim:
+                claimName: hermes-agent-data
+            - name: host-aws-creds
+              hostPath:
+                path: /root/.aws
+                type: Directory

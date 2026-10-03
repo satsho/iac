@@ -1,0 +1,64 @@
+# 第1段階: 自宅ネットワーク内(Tailscale経由)のみで動作確認する構成。
+# 認証(Keycloak/oauth2-proxy)やインターネット公開は、動作確認が取れてから追加する。
+#
+# GOOGLE_API_KEYはGitOps管理外。事前にkubectlで作成しておくこと:
+#   kubectl create namespace hermes
+#   kubectl create secret generic hermes-agent-secrets -n hermes \
+#     --from-literal=GOOGLE_API_KEY='<Google AI StudioのAPIキー>'
+#
+# 初回起動後、どのGeminiモデルを使うかの選択はhermes model(対話コマンド)が
+# 必要なので、Podが起動したら一度だけ手動で実行すること(README参照)。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hermes-agent
+  namespace: hermes
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: hermes-agent
+  template:
+    metadata:
+      labels:
+        app: hermes-agent
+    spec:
+      containers:
+        - name: hermes
+          image: nousresearch/hermes-agent:v2026.9.24
+          args:
+            - gateway
+            - run
+          env:
+            - name: HERMES_DASHBOARD
+              value: "1"
+            - name: GOOGLE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-agent-secrets
+                  key: GOOGLE_API_KEY
+          ports:
+            - name: gateway
+              containerPort: 8642
+            - name: dashboard
+              containerPort: 9119
+          volumeMounts:
+            - name: hermes-data
+              mountPath: /opt/data
+          readinessProbe:
+            tcpSocket:
+              port: 8642
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              memory: "2Gi"
+      volumes:
+        - name: hermes-data
+          persistentVolumeClaim:
+            claimName: hermes-agent-data

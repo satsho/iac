@@ -1,0 +1,21 @@
+# hermes-agent-secrets シークレットを事前に作成しておくこと(manifests/hermes-agent/README.md参照)。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hermes-agent
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/satsho/iac.git
+    targetRevision: main
+    path: manifests/hermes-agent
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: hermes
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

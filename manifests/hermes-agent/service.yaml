@@ -15,6 +15,3 @@ spec:
       port: 9119
       targetPort: 9119
       nodePort: 30119
-    - name: gateway
-      port: 8642
-      targetPort: 8642

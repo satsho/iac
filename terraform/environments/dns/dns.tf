@@ -53,3 +53,20 @@ resource "aws_route53_record" "hermes_tailscale" {
   ttl     = 300
   records = [var.tailscale_home_ip]
 }
+
+# ハニーポットは他のサービスと違い、攻撃者に見つけてもらうため本物の
+# インターネットから到達可能にする必要がある(Tailscale限定にできない)。
+# 自宅のグローバルIPは固定ではないため、manifests/ddns-updaterのCronJobが
+# 実際のグローバルIPを検知してこのレコードを直接UPSERTする。Terraformが
+# 持つのは初期値だけで、CronJobによる書き換えはignore_changesで無視する。
+resource "aws_route53_record" "honeypot_ddns" {
+  zone_id = aws_route53_zone.main.zone_id
+  name    = "honeypot.${var.domain_name}"
+  type    = "A"
+  ttl     = 300
+  records = [var.tailscale_home_ip] # 初期値。実際の値はDDNS CronJobが上書きする
+
+  lifecycle {
+    ignore_changes = [records]
+  }
+}

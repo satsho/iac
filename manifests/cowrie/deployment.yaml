@@ -1,0 +1,89 @@
+# Cowrie本体(SSHハニーポット)+ ログをPostgresに流すサイドカー。
+#
+# securityContext: 侵害された場合の被害を最小化するため、非root・読み取り専用
+# ルートFS・capability全剥奪にしている(cowrie公式イメージはもともと非rootで
+# 動く設計)。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cowrie
+  namespace: honeypot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cowrie
+  template:
+    metadata:
+      labels:
+        app: cowrie
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: cowrie
+          image: cowrie/cowrie:latest
+          env:
+            - name: COWRIE_OUTPUT_JSONLOG_ENABLED
+              value: "true"
+            - name: COWRIE_HONEYPOT_HOSTNAME
+              value: honeypot
+          ports:
+            - name: ssh
+              containerPort: 2222
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            # cowrieのvarディレクトリ(ログ・ダウンロードファイル置き場)は
+            # 書き込みが必要なので、ここだけemptyDirでマウントする。
+            # 実際のログパスはcowrieのバージョンにより異なる場合があるため、
+            # 初回デプロイ後に`kubectl exec -n honeypot deploy/cowrie -- find /cowrie -name cowrie.json`
+            # で確認し、ズレていればLOG_PATHと合わせて調整すること。
+            - name: cowrie-var
+              mountPath: /cowrie/cowrie-git/var
+          resources:
+            requests: {cpu: "100m", memory: "128Mi"}
+            limits: {memory: "512Mi"}
+        - name: log-shipper
+          image: python:3.12-slim
+          command:
+            - sh
+            - -c
+            - pip install --no-cache-dir --quiet psycopg2-binary && python /scripts/ship.py
+          env:
+            - name: LOG_PATH
+              value: /cowrie-logs/cowrie.json
+            - name: PGHOST
+              value: honeypot-postgres
+            - name: PGDATABASE
+              value: honeypot
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef: {name: honeypot-postgres-secrets, key: username}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef: {name: honeypot-postgres-secrets, key: password}
+          volumeMounts:
+            - name: cowrie-var
+              mountPath: /cowrie-logs
+              subPath: log/cowrie
+              readOnly: true
+            - name: shipper-script
+              mountPath: /scripts
+          securityContext:
+            readOnlyRootFilesystem: false # pip installのため
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: {cpu: "50m", memory: "128Mi"}
+            limits: {memory: "256Mi"}
+      volumes:
+        - name: cowrie-var
+          emptyDir: {}
+        - name: shipper-script
+          configMap:
+            name: cowrie-log-shipper

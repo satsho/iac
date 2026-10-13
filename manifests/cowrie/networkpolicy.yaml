@@ -1,0 +1,36 @@
+# ここが隔離の核心部分。Cowrieは「攻撃者に見つけてもらう」ことが目的なので
+# Ingressは制限しない(本物のインターネットからの接続を受け入れる必要がある)。
+# 一方でEgressは、侵害された場合に他namespace(hermes/keycloak等)やAWSへ
+# 横移動されないよう、Postgres宛とDNS以外を全拒否する。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cowrie-egress-lockdown
+  namespace: honeypot
+spec:
+  podSelector:
+    matchLabels:
+      app: cowrie
+  policyTypes:
+    - Egress
+  egress:
+    # 同namespace内のPostgresへのみ許可
+    - to:
+        - podSelector:
+            matchLabels:
+              app: honeypot-postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    # DNS解決(kube-system内のcorednsへ)。
+    # kubernetes.io/metadata.nameはK8s 1.21+で各namespaceに自動付与される
+    # 標準ラベル。
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

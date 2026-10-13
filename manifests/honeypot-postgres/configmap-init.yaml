@@ -1,0 +1,27 @@
+# postgresイメージは/docker-entrypoint-initdb.d/配下の*.sqlを初回起動時(データ
+# ディレクトリが空の時だけ)に自動実行する。2回目以降の起動では走らないため、
+# スキーマ変更はこのConfigMapを直接編集しても反映されない点に注意
+# (その場合は手動でpsql経由でALTER TABLEする)。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: honeypot-postgres-init
+  namespace: honeypot
+data:
+  001-schema.sql: |
+    CREATE TABLE IF NOT EXISTS honeypot_events (
+      id          BIGSERIAL PRIMARY KEY,
+      event_time  TIMESTAMPTZ NOT NULL,
+      src_ip      INET NOT NULL,
+      src_country TEXT,              -- 国名。取り込み時は未解決(NULL)。後で別バッチで埋める
+      session_id  TEXT NOT NULL,
+      event_type  TEXT NOT NULL,     -- cowrie.login.success / cowrie.command.input 等
+      username    TEXT,
+      password    TEXT,
+      command     TEXT,
+      raw_event   JSONB NOT NULL     -- cowrie.jsonの元の1行をそのまま保存
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_honeypot_events_src_ip ON honeypot_events (src_ip);
+    CREATE INDEX IF NOT EXISTS idx_honeypot_events_event_type ON honeypot_events (event_type);
+    CREATE INDEX IF NOT EXISTS idx_honeypot_events_event_time ON honeypot_events (event_time);

@@ -12,6 +12,14 @@
   DDNS(`manifests/ddns-updater`)経由で自宅の実際のグローバルIPを指して
   いること
 
+## log-shipperがインターネットに出ない理由
+
+log-shipperは`psycopg2-binary`を使うが、NetworkPolicyでPostgres+DNS以外への
+egressを塞いでいるため、Pod自身は`pip install`できない。そこで
+`job-pip-install.yaml`(ArgoCDのPreSyncフック、`app: cowrie`ラベルを持たない
+ため NetworkPolicy の対象外)が、Syncのたびに一度だけPVC(`cowrie-pip-cache`)
+にインストールし、log-shipperはそこを`PYTHONPATH`で読むだけにしている。
+
 ## 自宅ルーターの設定(手動、ここだけはTerraform/Ansibleで自動化できない)
 
 ルーターの管理画面(ポート転送/バーチャルサーバ等の設定項目)で:

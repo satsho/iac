@@ -1,0 +1,37 @@
+# log-shipperが必要とするpsycopg2-binaryを、ArgoCDのSync前に一度だけ
+# インストールしてPVCに保存するJob。
+#
+# このPodは`app: cowrie`ラベルを持たないため、networkpolicy.yamlの
+# Egress制限(podSelector: app=cowrie)の対象外 = 通常通りインターネットに
+# 出られる。これにより、常時起動しているlog-shipperサイドカー自体は
+# 一切インターネットへ出る必要が無いまま(Postgres+DNSのみ)に保てる。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cowrie-pip-install
+  namespace: honeypot
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: cowrie-pip-install
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: pip-install
+          image: python:3.12-slim
+          command:
+            - sh
+            - -c
+            - pip install --no-cache-dir --target=/pip-packages psycopg2-binary
+          volumeMounts:
+            - name: pip-cache
+              mountPath: /pip-packages
+      volumes:
+        - name: pip-cache
+          persistentVolumeClaim:
+            claimName: cowrie-pip-cache

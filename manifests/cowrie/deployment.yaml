@@ -1,11 +1,14 @@
 # Cowrie本体(SSHハニーポット)+ ログをPostgresに流すサイドカー。
 #
+# log-shipperが使うpsycopg2-binaryは、job-pip-install.yaml(ArgoCDのPreSync
+# フック)が事前にPVC(cowrie-pip-cache)へインストール済みのものを読むだけ。
+# log-shipper自身はNetworkPolicyでPostgres+DNS以外にegressできないため、
+# 実行時にpip installすることはできない(できてしまうと隔離の意味が無い)。
+#
 # securityContext: 攻撃者と直接対峙するcowrieコンテナだけ非root・読み取り専用
 # ルートFS・capability全剥奪にする(cowrie公式イメージはもともと非rootで動く
 # 設計)。log-shipperはpython:3.12-slim(デフォルトroot実行、USER指定なし)を
-# 使っていてpip installもするため、Pod全体には runAsNonRoot を強制しない
-# (コンテナごとに個別設定する)。log-shipperはPostgres+DNS以外にegressできない
-# NetworkPolicyで隔離されているので、root実行のリスクは許容する。
+# 使うため、Pod全体には runAsNonRoot を強制しない(コンテナごとに個別設定)。
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -54,10 +57,14 @@ spec:
         - name: log-shipper
           image: python:3.12-slim
           command:
-            - sh
-            - -c
-            - pip install --no-cache-dir --quiet psycopg2-binary && python /scripts/ship.py
+            - python
+            - /scripts/ship.py
           env:
+            # psycopg2-binaryはjob-pip-install.yaml(ArgoCDのPreSyncフック)が
+            # 事前にここへインストール済み。このコンテナ自身はpip installの
+            # ためにインターネットへ出る必要が無い(NetworkPolicyでも出られない)。
+            - name: PYTHONPATH
+              value: /pip-packages
             - name: LOG_PATH
               value: /cowrie-logs/cowrie.json
             - name: PGHOST
@@ -77,8 +84,11 @@ spec:
               readOnly: true
             - name: shipper-script
               mountPath: /scripts
+            - name: pip-cache
+              mountPath: /pip-packages
+              readOnly: true
           securityContext:
-            readOnlyRootFilesystem: false # pip installのため
+            readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
@@ -91,3 +101,6 @@ spec:
         - name: shipper-script
           configMap:
             name: cowrie-log-shipper
+        - name: pip-cache
+          persistentVolumeClaim:
+            claimName: cowrie-pip-cache

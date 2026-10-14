@@ -1,0 +1,22 @@
+# log-shipperが使うpsycopg2-binaryの保存先。cowrie本体のNetworkPolicy
+# (app: cowrieのみ対象)の外側にあるJob(job-pip-install.yaml)が一度だけここに
+# インストールし、log-shipperサイドカーは実行時にインターネットへ出ずに
+# ここから読み込むだけにする。
+#
+# job-pip-install.yamlと同じPreSyncフックにしておく(通常のSyncフェーズより
+# 前に実行されるため、PVCが無い状態でJobのPodがマウントを待ち続けることを
+# 防ぐ)。hook-delete-policyは付けない(付けるとSyncごとにPVCとインストール
+# 済みパッケージが消えてしまう)。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cowrie-pip-cache
+  namespace: honeypot
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 200Mi

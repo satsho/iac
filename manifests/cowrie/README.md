@@ -49,8 +49,11 @@ Cowrie公式イメージのJSONログの実際の出力パスはバージョン�
 `subPath`を実際のパスに合わせて修正すること:
 
 ```bash
-kubectl exec -n honeypot deploy/cowrie -c cowrie -- find /cowrie -name cowrie.json
+kubectl exec -n honeypot deploy/cowrie -c cowrie -- /bin/ls -la /cowrie/cowrie-git/var/log/cowrie/
 ```
+
+(コンテナのPATHにcowrieのvenv binしか含まれておらず、`ls`/`find`を素のコマンド名
+では呼べないため、絶対パスで実行する)
 
 ## 国別・攻撃手法別の分析について
 

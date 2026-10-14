@@ -1,0 +1,15 @@
+# 自宅ルーターのポート転送先。WANの22番からこのNodePort(30022)に転送する。
+apiVersion: v1
+kind: Service
+metadata:
+  name: cowrie
+  namespace: honeypot
+spec:
+  type: NodePort
+  selector:
+    app: cowrie
+  ports:
+    - name: ssh
+      port: 2222
+      targetPort: 2222
+      nodePort: 30022

@@ -1,0 +1,13 @@
+# クラスタ内のみ(ClusterIP)。外部にも他namespaceにも公開しない。
+apiVersion: v1
+kind: Service
+metadata:
+  name: honeypot-postgres
+  namespace: honeypot
+spec:
+  type: ClusterIP
+  selector:
+    app: honeypot-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432

@@ -1,8 +1,11 @@
 # Cowrie本体(SSHハニーポット)+ ログをPostgresに流すサイドカー。
 #
-# securityContext: 侵害された場合の被害を最小化するため、非root・読み取り専用
-# ルートFS・capability全剥奪にしている(cowrie公式イメージはもともと非rootで
-# 動く設計)。
+# securityContext: 攻撃者と直接対峙するcowrieコンテナだけ非root・読み取り専用
+# ルートFS・capability全剥奪にする(cowrie公式イメージはもともと非rootで動く
+# 設計)。log-shipperはpython:3.12-slim(デフォルトroot実行、USER指定なし)を
+# 使っていてpip installもするため、Pod全体には runAsNonRoot を強制しない
+# (コンテナごとに個別設定する)。log-shipperはPostgres+DNS以外にegressできない
+# NetworkPolicyで隔離されているので、root実行のリスクは許容する。
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -18,8 +21,6 @@ spec:
       labels:
         app: cowrie
     spec:
-      securityContext:
-        runAsNonRoot: true
       containers:
         - name: cowrie
           image: cowrie/cowrie:latest
@@ -32,6 +33,7 @@ spec:
             - name: ssh
               containerPort: 2222
           securityContext:
+            runAsNonRoot: true
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
             capabilities:
@@ -40,8 +42,10 @@ spec:
             # cowrieのvarディレクトリ(ログ・ダウンロードファイル置き場)は
             # 書き込みが必要なので、ここだけemptyDirでマウントする。
             # 実際のログパスはcowrieのバージョンにより異なる場合があるため、
-            # 初回デプロイ後に`kubectl exec -n honeypot deploy/cowrie -- find /cowrie -name cowrie.json`
-            # で確認し、ズレていればLOG_PATHと合わせて調整すること。
+            # 初回デプロイ後に`kubectl exec -n honeypot deploy/cowrie -c cowrie -- /bin/ls -la /cowrie/cowrie-git/var/log/cowrie/`
+            # で確認し、ズレていればLOG_PATHと合わせて調整すること
+            # (PATHにcowrieのvenv binしか無く`ls`/`find`が素のコマンド名では
+            # 見つからないため、絶対パス指定で呼び出す)。
             - name: cowrie-var
               mountPath: /cowrie/cowrie-git/var
           resources:

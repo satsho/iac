@@ -1,5 +1,8 @@
-# log-shipperが必要とするpsycopg2-binaryを、ArgoCDのSync前に一度だけ
-# インストールしてPVCに保存するJob。
+# log-shipperが必要とするpsycopg2-binaryを、一度だけインストールしてPVCに
+# 保存するJob。ArgoCDのhookにはしない(PreSyncフックにした結果、PVC側が
+# pruneで消される事故が起きたため、普通に追跡される一回限りのJobとして
+# 扱う)。このJobは二度と再実行されない(spec変更時は手動で
+# `kubectl delete job cowrie-pip-install -n honeypot`してから再同期する)。
 #
 # このPodは`app: cowrie`ラベルを持たないため、networkpolicy.yamlの
 # Egress制限(podSelector: app=cowrie)の対象外 = 通常通りインターネットに
@@ -10,9 +13,6 @@ kind: Job
 metadata:
   name: cowrie-pip-install
   namespace: honeypot
-  annotations:
-    argocd.argoproj.io/hook: PreSync
-    argocd.argoproj.io/hook-delete-policy: HookSucceeded
 spec:
   backoffLimit: 2
   template:

@@ -16,9 +16,18 @@
 
 log-shipperは`psycopg2-binary`を使うが、NetworkPolicyでPostgres+DNS以外への
 egressを塞いでいるため、Pod自身は`pip install`できない。そこで
-`job-pip-install.yaml`(ArgoCDのPreSyncフック、`app: cowrie`ラベルを持たない
-ため NetworkPolicy の対象外)が、Syncのたびに一度だけPVC(`cowrie-pip-cache`)
-にインストールし、log-shipperはそこを`PYTHONPATH`で読むだけにしている。
+`job-pip-install.yaml`(`app: cowrie`ラベルを持たないためNetworkPolicyの
+対象外)が、一度だけPVC(`cowrie-pip-cache`)にインストールし、log-shipperは
+そこを`PYTHONPATH`で読むだけにしている。
+
+このJobはArgoCDのhookではなく普通のJobとして追跡される(一度だけ実行され、
+その後は変更されない限り再実行されない)。`pip install`の内容を変える場合は
+`kubectl delete job cowrie-pip-install -n honeypot`で手動削除してから
+再同期すること(Jobのspecは不変のため、ArgoCDが自動で更新してくれない)。
+
+log-shipperは起動直後、Jobが完了してPVCにパッケージが入るまで数回クラッシュ
+ループすることがあるが、Jobが完了すれば次のコンテナ再起動時に自動で復帰する
+(自己修復するので手動対応は不要)。
 
 ## 自宅ルーターの設定(手動、ここだけはTerraform/Ansibleで自動化できない)
 

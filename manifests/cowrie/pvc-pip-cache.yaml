@@ -3,17 +3,16 @@
 # インストールし、log-shipperサイドカーは実行時にインターネットへ出ずに
 # ここから読み込むだけにする。
 #
-# job-pip-install.yamlと同じPreSyncフックにしておく(通常のSyncフェーズより
-# 前に実行されるため、PVCが無い状態でJobのPodがマウントを待ち続けることを
-# 防ぐ)。hook-delete-policyは付けない(付けるとSyncごとにPVCとインストール
-# 済みパッケージが消えてしまう)。
+# ArgoCDのhookにはしない(PreSyncフックにした結果、ArgoCDが「一時リソース」
+# と判断してprune時に削除してしまう事故が起きた)。honeypot-postgres-dataと
+# 同じ普通のPVCとして永続させる。順序保証が無くなる分、log-shipperが最初の
+# 数回クラッシュループする可能性はあるが、Jobが完了してパッケージが入れば
+# 次のコンテナ再起動時に自動で復帰する(自己修復するので実害は無い)。
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: cowrie-pip-cache
   namespace: honeypot
-  annotations:
-    argocd.argoproj.io/hook: PreSync
 spec:
   accessModes:
     - ReadWriteOnce

@@ -56,17 +56,17 @@ resource "aws_route53_record" "hermes_tailscale" {
 
 # ハニーポットは他のサービスと違い、攻撃者に見つけてもらうため本物の
 # インターネットから到達可能にする必要がある(Tailscale限定にできない)。
-# 自宅のグローバルIPは固定ではないため、manifests/ddns-updaterのCronJobが
-# 実際のグローバルIPを検知してこのレコードを直接UPSERTする。Terraformが
-# 持つのは初期値だけで、CronJobによる書き換えはignore_changesで無視する。
-resource "aws_route53_record" "honeypot_ddns" {
+# 自宅のISP(NURO)がCGNATでIPv4を複数契約者と共有しており、ルーターの
+# ポート転送が使えないため、自宅のグローバルIPを直接指すのではなく
+# Tailscale Funnel(自宅サーバの既存のtailnet接続をそのまま使って公開する
+# Tailscaleの機能)経由で公開する。公開先はTailscaleが管理するtailnetの
+# FQDNなので、DDNSで追従させるAレコードではなく単純なCNAMEにする。
+# (manifests/ddns-updaterのCronJobはこの用途では使わなくなったため、
+# suspend: true で休止している)
+resource "aws_route53_record" "honeypot_funnel" {
   zone_id = aws_route53_zone.main.zone_id
   name    = "honeypot.${var.domain_name}"
-  type    = "A"
+  type    = "CNAME"
   ttl     = 300
-  records = [var.tailscale_home_ip] # 初期値。実際の値はDDNS CronJobが上書きする
-
-  lifecycle {
-    ignore_changes = [records]
-  }
+  records = ["iac-home.tail478255.ts.net"]
 }

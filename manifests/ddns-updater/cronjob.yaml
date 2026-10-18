@@ -1,6 +1,10 @@
 # 自宅のグローバルIPは固定ではないため、定期的に実際のIPを検知してRoute53の
-# honeypot.focus4.netレコードを直接UPSERTする。ハニーポットだけが本物の
-# インターネットに公開される前提なので、対象はこのレコードのみ。
+# honeypot.focus4.netレコードを直接UPSERTする想定で作ったが、自宅のISP
+# (NURO)がCGNATでIPv4を複数契約者と共有しており、そもそも自宅のグローバルIP
+# 宛にルーターのポート転送ができないことが判明。ハニーポットの公開は
+# Tailscale Funnel経由(honeypot_funnel、CNAME)に変更したため、このCronJob
+# は今は使い道が無い。削除はせず、将来「自分専用の固定IPv4が使えるようになった」
+# 等の場合に備えてsuspendで休止している。
 #
 # 認証はSSM Hybrid Activationの一時クレデンシャル(/root/.aws/credentials、
 # ホスト上でSSM Agentが自動更新)をそのままhostPathでマウントして使う
@@ -11,6 +15,7 @@ metadata:
   name: ddns-updater
   namespace: ddns
 spec:
+  suspend: true
   schedule: "*/10 * * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3

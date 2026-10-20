@@ -63,6 +63,10 @@ resource "aws_route53_record" "hermes_tailscale" {
 # FQDNなので、DDNSで追従させるAレコードではなく単純なCNAMEにする。
 # (manifests/ddns-updaterのCronJobはこの用途では使わなくなったため、
 # suspend: true で休止している)
+# ハニーポット本体はmanifests/http-honeypot(自作のHTTPハニーポット)。
+# 当初Cowrie(SSH)で実装していたが、Tailscale Funnelの生TCPモードが
+# TLSハンドシェイクを前提とし非TLSプロトコルを通せないため、Funnelが
+# 自然にサポートするHTTP(S)型に切り替えた。
 resource "aws_route53_record" "honeypot_funnel" {
   zone_id = aws_route53_zone.main.zone_id
   name    = "honeypot.${var.domain_name}"

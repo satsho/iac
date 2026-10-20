@@ -1,5 +1,8 @@
-# Tailscale Funnelの中継先。`tailscale funnel 30080`のようにNodePortを直接
+# Tailscale Funnelの中継先。`tailscale funnel 30081`のようにNodePortを直接
 # 指定して公開する。
+# 30080は`default`namespaceのdemo-nginxが既に使っているため、ここでは
+# 30081を使う(衝突するとこのServiceの作成自体が失敗し、デバッグに
+# ハマったので注意)。
 apiVersion: v1
 kind: Service
 metadata:
@@ -13,4 +16,4 @@ spec:
     - name: http
       port: 8080
       targetPort: 8080
-      nodePort: 30080
+      nodePort: 30081

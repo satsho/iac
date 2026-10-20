@@ -40,8 +40,8 @@ Cowrieで使っていた生TCPモード(`--tcp=10000`)は停止し、HTTP(S)の
 # Cowrie時代の設定をオフにする(まだ残っていれば)
 tailscale funnel --tcp=10000 off
 
-# このNodePort(30080)をHTTPSの443番で公開する
-tailscale funnel --bg 30080
+# このNodePort(30081)をHTTPSの443番で公開する
+tailscale funnel --bg 30081
 tailscale funnel status
 ```
 

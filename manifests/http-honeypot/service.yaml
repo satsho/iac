@@ -1,0 +1,16 @@
+# Tailscale Funnelの中継先。`tailscale funnel 30080`のようにNodePortを直接
+# 指定して公開する。
+apiVersion: v1
+kind: Service
+metadata:
+  name: http-honeypot
+  namespace: honeypot
+spec:
+  type: NodePort
+  selector:
+    app: http-honeypot
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      nodePort: 30080

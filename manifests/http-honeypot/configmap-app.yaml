@@ -1,0 +1,175 @@
+# 自作の最小HTTPハニーポット。標準ライブラリのみでHTTPサーバを立て、
+# リクエストごとに直接Postgresへ記録する(Cowrieのようにログファイルを
+# サイドカーでtailする必要が無く、構成がシンプルになる)。
+#
+# よく狙われるパスには偽のコンテンツを返し、それ以外は汎用404を返す。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: http-honeypot-app
+  namespace: honeypot
+data:
+  app.py: |
+    import json
+    import os
+    import socketserver
+    from datetime import datetime, timezone
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    import psycopg2
+
+    PORT = 8080
+    MAX_BODY_BYTES = 65536
+
+    PGHOST = os.environ["PGHOST"]
+    PGPORT = os.environ.get("PGPORT", "5432")
+    PGDATABASE = os.environ["PGDATABASE"]
+    PGUSER = os.environ["PGUSER"]
+    PGPASSWORD = os.environ["PGPASSWORD"]
+
+    SCHEMA_SQL = """
+    CREATE TABLE IF NOT EXISTS http_honeypot_events (
+      id           BIGSERIAL PRIMARY KEY,
+      event_time   TIMESTAMPTZ NOT NULL DEFAULT now(),
+      src_ip       INET NOT NULL,
+      src_country  TEXT,
+      method       TEXT NOT NULL,
+      path         TEXT NOT NULL,
+      query_string TEXT,
+      user_agent   TEXT,
+      headers      JSONB NOT NULL,
+      body         TEXT,
+      status_code  INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_http_honeypot_events_src_ip ON http_honeypot_events (src_ip);
+    CREATE INDEX IF NOT EXISTS idx_http_honeypot_events_path ON http_honeypot_events (path);
+    CREATE INDEX IF NOT EXISTS idx_http_honeypot_events_event_time ON http_honeypot_events (event_time);
+    """
+
+    # よく無差別スキャンで狙われるパス。(content_type, body, status)
+    DECOY_RESPONSES = {
+        "/wp-login.php": (
+            "text/html",
+            "<html><head><title>Log In &lsaquo; WordPress</title></head>"
+            "<body><form method=\"post\"><h1>WordPress</h1>"
+            "<input name=\"log\" placeholder=\"Username\">"
+            "<input name=\"pwd\" type=\"password\" placeholder=\"Password\">"
+            "<button>Log In</button></form></body></html>",
+            200,
+        ),
+        "/.env": (
+            "text/plain",
+            "APP_ENV=production\nDB_HOST=127.0.0.1\nDB_DATABASE=app\n"
+            "DB_USERNAME=app\nDB_PASSWORD=changeme123\n",
+            200,
+        ),
+        "/.git/config": (
+            "text/plain",
+            "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n"
+            "[remote \"origin\"]\n\turl = https://github.com/example/app.git\n",
+            200,
+        ),
+        "/phpmyadmin/": (
+            "text/html",
+            "<html><head><title>phpMyAdmin</title></head>"
+            "<body><h1>phpMyAdmin</h1><form method=\"post\">"
+            "<input name=\"pma_username\" placeholder=\"Username\">"
+            "<input name=\"pma_password\" type=\"password\" placeholder=\"Password\">"
+            "<button>Go</button></form></body></html>",
+            200,
+        ),
+    }
+
+    def get_connection():
+        return psycopg2.connect(
+            host=PGHOST, port=PGPORT, dbname=PGDATABASE,
+            user=PGUSER, password=PGPASSWORD,
+        )
+
+    def ensure_schema():
+        conn = get_connection()
+        try:
+            conn.autocommit = True
+            cur = conn.cursor()
+            cur.execute(SCHEMA_SQL)
+        finally:
+            conn.close()
+
+    class Handler(BaseHTTPRequestHandler):
+        server_version = "Apache/2.4.41"  # わざと古い実在バージョンを名乗る
+
+        def _read_body(self):
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            length = min(length, MAX_BODY_BYTES)
+            if length <= 0:
+                return ""
+            try:
+                return self.rfile.read(length).decode("utf-8", errors="replace")
+            except Exception:
+                return ""
+
+        def _log_event(self, method, body, status_code):
+            try:
+                conn = get_connection()
+                try:
+                    conn.autocommit = True
+                    cur = conn.cursor()
+                    cur.execute(
+                        """
+                        INSERT INTO http_honeypot_events
+                            (src_ip, method, path, query_string, user_agent, headers, body, status_code)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            self.client_address[0],
+                            method,
+                            self.path.split("?", 1)[0],
+                            self.path.split("?", 1)[1] if "?" in self.path else None,
+                            self.headers.get("User-Agent"),
+                            json.dumps(dict(self.headers.items())),
+                            body[:MAX_BODY_BYTES],
+                            status_code,
+                        ),
+                    )
+                finally:
+                    conn.close()
+            except Exception as exc:
+                print(f"[{datetime.now(timezone.utc).isoformat()}] log failed: {exc}", flush=True)
+
+        def _respond(self, method, body=""):
+            path = self.path.split("?", 1)[0]
+            content_type, resp_body, status = DECOY_RESPONSES.get(
+                path, ("text/plain", "Not Found", 404)
+            )
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(resp_body)))
+            self.end_headers()
+            if method != "HEAD":
+                self.wfile.write(resp_body.encode("utf-8"))
+            self._log_event(method, body, status)
+
+        def do_GET(self):
+            self._respond("GET")
+
+        def do_HEAD(self):
+            self._respond("HEAD")
+
+        def do_POST(self):
+            self._respond("POST", self._read_body())
+
+        def do_PUT(self):
+            self._respond("PUT", self._read_body())
+
+        def do_DELETE(self):
+            self._respond("DELETE")
+
+        def log_message(self, fmt, *args):
+            pass  # アクセスログはPostgresに入れているので標準出力には出さない
+
+    if __name__ == "__main__":
+        ensure_schema()
+        print(f"listening on 0.0.0.0:{PORT}", flush=True)
+        ThreadingHTTPServer.allow_reuse_address = True
+        server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+        server.serve_forever()

@@ -1,15 +1,15 @@
-# honeypot-postgresが先にSyncされている必要がある(manifests/cowrie/README.md参照)。
+# honeypot-postgres-secrets シークレットが既に存在すること(manifests/honeypot-postgres/README.md参照)。
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: cowrie
+  name: http-honeypot
   namespace: argocd
 spec:
   project: default
   source:
     repoURL: https://github.com/satsho/iac.git
     targetRevision: main
-    path: manifests/cowrie
+    path: manifests/http-honeypot
   destination:
     server: https://kubernetes.default.svc
     namespace: honeypot

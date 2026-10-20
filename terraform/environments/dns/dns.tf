@@ -34,16 +34,6 @@ resource "aws_route53_record" "keycloak_tailscale" {
   records = [var.tailscale_home_ip]
 }
 
-# demo-nginx(oauth2-proxy経由)も同じホスト上のGatewayで受けているため、
-# 同じTailscale IPを指す。
-resource "aws_route53_record" "demo_tailscale" {
-  zone_id = aws_route53_zone.main.zone_id
-  name    = "demo.${var.domain_name}"
-  type    = "A"
-  ttl     = 300
-  records = [var.tailscale_home_ip]
-}
-
 # Hermes Agentダッシュボードも同じホスト上のGatewayで受けているため、
 # 同じTailscale IPを指す。
 resource "aws_route53_record" "hermes_tailscale" {

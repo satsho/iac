@@ -108,6 +108,18 @@ data:
             except Exception:
                 return ""
 
+        def _client_ip(self):
+            # TailscaleのFunnelはホスト上のtailscaledが127.0.0.1へ中継するリバース
+            # プロキシなので、self.client_address[0](さらにそれがNodePort経由で
+            # podネットワークへ入る際にKubernetesがSNATする)は本当の攻撃者IPでは
+            # ない。tailscaledが付けるX-Forwarded-Forを優先する。このPodは
+            # NodePort経由でしか到達できず、tailscaled以外がこのヘッダーを
+            # 付けて届けることは無いため、素直に信用してよい。
+            forwarded = self.headers.get("X-Forwarded-For")
+            if forwarded:
+                return forwarded.split(",")[0].strip()
+            return self.client_address[0]
+
         def _log_event(self, method, body, status_code):
             try:
                 conn = get_connection()
@@ -121,7 +133,7 @@ data:
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                         """,
                         (
-                            self.client_address[0],
+                            self._client_ip(),
                             method,
                             self.path.split("?", 1)[0],
                             self.path.split("?", 1)[1] if "?" in self.path else None,

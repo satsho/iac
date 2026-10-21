@@ -116,7 +116,15 @@ data:
             # NodePort経由でしか到達できず、tailscaled以外がこのヘッダーを
             # 付けて届けることは無いため、素直に信用してよい。
             forwarded = self.headers.get("X-Forwarded-For")
-            print(f"DEBUG _client_ip: forwarded={forwarded!r} client_address={self.client_address[0]!r} all_headers={list(self.headers.items())!r}", flush=True)
+            try:
+                with open("/tmp/debug.log", "a") as f:
+                    f.write(f"DEBUG _client_ip: forwarded={forwarded!r} client_address={self.client_address[0]!r} all_headers={list(self.headers.items())!r}\n")
+            except Exception as exc:
+                try:
+                    with open("/tmp/debug.log", "a") as f:
+                        f.write(f"DEBUG write failed: {exc!r}\n")
+                except Exception:
+                    pass
             if forwarded:
                 return forwarded.split(",")[0].strip()
             return self.client_address[0]
@@ -148,8 +156,18 @@ data:
                     conn.close()
             except Exception as exc:
                 print(f"[{datetime.now(timezone.utc).isoformat()}] log failed: {exc}", flush=True)
+                try:
+                    with open("/tmp/debug.log", "a") as f:
+                        f.write(f"DEBUG _log_event failed: {exc!r}\n")
+                except Exception:
+                    pass
 
         def _respond(self, method, body=""):
+            try:
+                with open("/tmp/debug.log", "a") as f:
+                    f.write(f"DEBUG _respond called: method={method!r} path={self.path!r}\n")
+            except Exception:
+                pass
             path = self.path.split("?", 1)[0]
             content_type, resp_body, status = DECOY_RESPONSES.get(
                 path, ("text/plain", "Not Found", 404)

@@ -116,6 +116,7 @@ data:
             # NodePort経由でしか到達できず、tailscaled以外がこのヘッダーを
             # 付けて届けることは無いため、素直に信用してよい。
             forwarded = self.headers.get("X-Forwarded-For")
+            print(f"DEBUG _client_ip: forwarded={forwarded!r} client_address={self.client_address[0]!r} all_headers={list(self.headers.items())!r}", flush=True)
             if forwarded:
                 return forwarded.split(",")[0].strip()
             return self.client_address[0]

@@ -14,8 +14,10 @@ iac/                          # リポジトリルート
 │   │   │   # state は1つ(環境ごとにまとめて作成・削除)だが、可読性のため
 │   │   │   # リソースドメインごとに.tfファイルを分割している:
 │   │   │   #   network.tf(networkモジュール呼び出し) / security_group.tf / iam.tf / ec2.tf / lb.tf
-│   │   └── dns/                # ドメイン(Route 53 hosted zone)専用の別state。
-│   │       # devとライフサイクルが違う(destroyされたくない)ので分離している
+│   │   ├── dns/                # ドメイン(Route 53 hosted zone)専用の別state。
+│   │   │   # devとライフサイクルが違う(destroyされたくない)ので分離している
+│   │   └── patch-mgmt/         # Patch Managerによるパッチ管理・リポジトリ更新の検証環境(別state)
+│   │       # 詳細は environments/patch-mgmt/README.md
 │   ├── modules/
 │   │   └── network/          # VPC・サブネット・ルーティング一式のモジュール(再利用可能な部品)
 │   ├── iam/                  # IAMロール定義(CFNテンプレート)
@@ -465,6 +467,17 @@ curl -i "$(terraform output -raw api_gateway_url)"
 curl -i "$(terraform output -raw api_gateway_url)" \
   -H "Authorization: Bearer <取得したトークン>"
 ```
+
+### Step 14: パッチ管理・リポジトリ更新の検証環境(environments/patch-mgmt)
+
+プライベートサブネットにRHEL 10(PAYG)を5台(repository / infra / test / stg / prod)立て、
+Red Hat CDN → repository(reposync)→ infra(rsync)→ 業務サーバ(dnf)というリポジトリの流れと、
+Systems Manager Patch Managerによる段階的なパッチ適用(test → stg → prod)を検証する。
+使い捨て前提なので(以前の`environments/dev`と同様に)独立したstate(`patch-mgmt/terraform.tfstate`)にし、
+専用ワークフロー`.github/workflows/terraform-patch-mgmt.yml`で`plan`/`apply`/`destroy`する。
+
+設計(タグ・パッチベースライン・メンテナンスウィンドウ・ゲート・再起動パターン・緊急パッチ)と
+構築手順は [`environments/patch-mgmt/README.md`](environments/patch-mgmt/README.md) にまとめている。
 
 ## CloudFormation Git Sync(`iac-terraform-role` スタックの自動反映)
 

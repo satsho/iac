@@ -1,0 +1,83 @@
+# ---- repository: Red Hat CDNからreposyncしてリポジトリサーバとして公開する ----
+dnf install -y httpd rsync-daemon dnf-plugins-core
+
+mkdir -p /var/www/html/repos/rhel
+
+# --download-metadata でCDNのメタデータ(updateinfo.xmlを含む)をそのまま持ってくる。
+# updateinfo.xml が無いと Patch Manager が「Security」分類・深刻度・日付でパッチを
+# 判定できない(createrepo_cでメタデータを作り直すとupdateinfoが消える)ので必須。
+cat <<'EOF' > /usr/local/sbin/patch-reposync.sh
+#!/bin/bash
+set -euo pipefail
+mirror_root=/var/www/html/repos/rhel
+
+# 同期中はinfraからのrsyncをスキップさせるための目印
+touch "$mirror_root/.sync-in-progress"
+trap 'rm -f "$mirror_root/.sync-in-progress"' EXIT
+
+%{ for name, repo_id in upstream_repos ~}
+dnf reposync \
+  --repoid="${repo_id}" \
+  --download-path="$mirror_root/${release_dir}/${name}" \
+  --norepopath \
+  --download-metadata \
+  --delete \
+  --remote-time
+%{ endfor ~}
+
+date --iso-8601=seconds > "$mirror_root/${release_dir}/.last-sync"
+restorecon -R "$mirror_root"
+EOF
+chmod 755 /usr/local/sbin/patch-reposync.sh
+
+cat <<'EOF' > /etc/systemd/system/patch-reposync.service
+[Unit]
+Description=Sync Red Hat CDN repositories into the local mirror
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/patch-reposync.sh
+TimeoutStartSec=12h
+EOF
+
+cat <<'EOF' > /etc/systemd/system/patch-reposync.timer
+[Unit]
+Description=Daily reposync from Red Hat CDN
+
+[Timer]
+OnCalendar=${reposync_schedule}
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+# infraからのミラー同期専用。読み取り専用で、infraのIPからのみ許可する
+cat <<'EOF' > /etc/rsyncd.conf
+uid = nobody
+gid = nobody
+use chroot = yes
+read only = yes
+max connections = 4
+log file = /var/log/rsyncd.log
+
+[rhel]
+path = /var/www/html/repos/rhel
+comment = Red Hat CDN mirror (reposync)
+hosts allow = ${infra_ip}
+hosts deny = *
+EOF
+# httpd用ラベル(httpd_sys_content_t)のディレクトリをrsyncdに読ませるためのSELinux設定
+setsebool -P rsync_export_all_ro 1
+
+if systemctl is-active --quiet firewalld; then
+  firewall-cmd --permanent --add-service=http --add-service=rsyncd
+  firewall-cmd --reload
+fi
+
+systemctl daemon-reload
+systemctl enable --now httpd rsyncd patch-reposync.timer
+# 初回の同期は数時間かかるので、user_dataの完了を待たせずバックグラウンドで始める
+systemctl start --no-block patch-reposync.service

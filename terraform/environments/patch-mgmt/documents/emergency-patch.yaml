@@ -1,0 +1,119 @@
+schemaVersion: '0.3'
+description: |-
+  緊急パッチ用。メンテナンスウィンドウやゲートを待たずに、タグで指定したサーバ群へ
+  AWS-RunPatchBaseline(Install)を実行する。実行前に承認者の承認(aws:approve)を必須にしている。
+
+  パッチの指定方法は2通り(README参照):
+    A. パッチベースラインの approved_patches に RHSA-xxxx:xxxx を追加してから実行する(推奨)
+    B. InstallOverrideList に、インストールするパッケージを書いたYAMLのS3/https URLを渡す
+assumeRole: '{{ AutomationAssumeRole }}'
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: このRunbookが引き受けるIAMロールのARN
+    default: ${automation_role_arn}
+  TargetTagKey:
+    type: String
+    description: 対象を選ぶタグのキー
+    default: PatchGroup
+  TargetTagValues:
+    type: StringList
+    description: 対象を選ぶタグの値(例 rhel10-test)。test → stg → prod の順に1環境ずつ実行することを推奨
+  InstallOverrideList:
+    type: String
+    description: (任意)インストールするパッチを列挙したYAMLのURL。空ならパッチベースラインに従う
+    default: ''
+  RebootOption:
+    type: String
+    description: RebootIfNeeded(必要なら自動再起動) / NoReboot(再起動は手動で行う)
+    default: RebootIfNeeded
+    allowedValues:
+      - RebootIfNeeded
+      - NoReboot
+  MaxConcurrency:
+    type: String
+    description: 同時に実行する台数(例 1, 10%)
+    default: '1'
+  MaxErrors:
+    type: String
+    description: この台数(割合)が失敗したら残りへの実行を止める
+    default: '0'
+  Approvers:
+    type: StringList
+    description: 承認者(IAMユーザー/ロールのARN)
+%{ if length(approvers) > 0 ~}
+    default: ${jsonencode(approvers)}
+%{ endif ~}
+  NotificationArn:
+    type: String
+    description: 承認依頼を通知するSNSトピック(名前がAutomationで始まっている必要がある)
+    default: ${topic_arn}
+  LogGroupName:
+    type: String
+    description: Run Commandの出力先ロググループ
+    default: ${log_group_name}
+mainSteps:
+  - name: ApproveEmergencyPatch
+    action: aws:approve
+    timeoutSeconds: 86400
+    onFailure: Abort
+    inputs:
+      NotificationArn: '{{ NotificationArn }}'
+      Message: '緊急パッチ適用の承認依頼(実行ID {{ automation:EXECUTION_ID }})。対象タグキー={{ TargetTagKey }}、RebootOption={{ RebootOption }}、InstallOverrideList={{ InstallOverrideList }}。対象のタグ値はAutomationの実行詳細で確認してください。'
+      MinRequiredApprovals: 1
+      Approvers: '{{ Approvers }}'
+  # aws:runCommand ではなく SendCommand API を直接呼んで、タグ指定・同時実行数・エラー閾値を使う
+  - name: SendPatchCommand
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ssm
+      Api: SendCommand
+      DocumentName: AWS-RunPatchBaseline
+      Targets:
+        - Key: 'tag:{{ TargetTagKey }}'
+          Values: '{{ TargetTagValues }}'
+      MaxConcurrency: '{{ MaxConcurrency }}'
+      MaxErrors: '{{ MaxErrors }}'
+      TimeoutSeconds: 600
+      Comment: 'emergency patch {{ automation:EXECUTION_ID }}'
+      Parameters:
+        Operation:
+          - Install
+        RebootOption:
+          - '{{ RebootOption }}'
+        InstallOverrideList:
+          - '{{ InstallOverrideList }}'
+      CloudWatchOutputConfig:
+        CloudWatchOutputEnabled: true
+        CloudWatchLogGroupName: '{{ LogGroupName }}'
+    outputs:
+      - Name: CommandId
+        Selector: $.Command.CommandId
+        Type: String
+  - name: WaitForPatchCommand
+    action: aws:waitForAwsResourceProperty
+    timeoutSeconds: 7200
+    onFailure: Abort
+    inputs:
+      Service: ssm
+      Api: ListCommands
+      CommandId: '{{ SendPatchCommand.CommandId }}'
+      PropertySelector: $.Commands[0].Status
+      DesiredValues:
+        - Success
+        - Failed
+        - Cancelled
+        - TimedOut
+  - name: AssertPatchCommandSucceeded
+    action: aws:assertAwsResourceProperty
+    onFailure: Abort
+    inputs:
+      Service: ssm
+      Api: ListCommands
+      CommandId: '{{ SendPatchCommand.CommandId }}'
+      PropertySelector: $.Commands[0].Status
+      DesiredValues:
+        - Success
+outputs:
+  - SendPatchCommand.CommandId

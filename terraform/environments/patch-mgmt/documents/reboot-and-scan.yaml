@@ -1,0 +1,57 @@
+schemaVersion: '0.3'
+description: |-
+  手動再起動パターン用。NoRebootでパッチを適用して「再起動待ち(InstalledPendingReboot)」に
+  なっているインスタンスを再起動し、再起動後にスキャンしてコンプライアンスを最新にする。
+  EC2コンソールなどから再起動しただけだと、次のスキャンまではPatch Manager上で
+  再起動待ちのまま残る(=次のステージのゲートチェックも通らない)ので、このRunbookを使う。
+assumeRole: '{{ AutomationAssumeRole }}'
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: このRunbookが引き受けるIAMロールのARN
+    default: ${automation_role_arn}
+  InstanceId:
+    type: String
+    description: 再起動するインスタンスID
+  LogGroupName:
+    type: String
+    description: Run Commandの出力先ロググループ
+    default: ${log_group_name}
+mainSteps:
+  - name: Reboot
+    action: aws:runCommand
+    timeoutSeconds: 1800
+    onFailure: Abort
+    inputs:
+      DocumentName: AWS-RunShellScript
+      InstanceIds:
+        - '{{ InstanceId }}'
+      Parameters:
+        commands:
+          - |
+            # 終了コード194を返すと、SSM Agentがインスタンスを再起動し、起動後にこの
+            # スクリプトをもう一度実行する。2回目は目印ファイルがあるので再起動せずに終わる。
+            marker=/var/tmp/patch-reboot.marker
+            if [ ! -f "$marker" ]; then
+              touch "$marker"
+              exit 194
+            fi
+            rm -f "$marker"
+            uptime
+      CloudWatchOutputConfig:
+        CloudWatchOutputEnabled: true
+        CloudWatchLogGroupName: '{{ LogGroupName }}'
+  - name: ScanAfterReboot
+    action: aws:runCommand
+    timeoutSeconds: 1800
+    onFailure: Abort
+    inputs:
+      DocumentName: AWS-RunPatchBaseline
+      InstanceIds:
+        - '{{ InstanceId }}'
+      Parameters:
+        Operation: Scan
+        RebootOption: NoReboot
+      CloudWatchOutputConfig:
+        CloudWatchOutputEnabled: true
+        CloudWatchLogGroupName: '{{ LogGroupName }}'

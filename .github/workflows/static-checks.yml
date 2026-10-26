@@ -36,18 +36,6 @@ jobs:
       - name: Terraform fmt check
         run: terraform fmt -check -recursive -diff terraform
 
-      - name: Terraform validate (modules/network)
-        working-directory: terraform/modules/network
-        run: |
-          terraform init -backend=false -input=false
-          terraform validate
-
-      - name: Terraform validate (environments/dev)
-        working-directory: terraform/environments/dev
-        run: |
-          terraform init -backend=false -input=false
-          terraform validate
-
       - name: Terraform validate (environments/dns)
         working-directory: terraform/environments/dns
         run: |

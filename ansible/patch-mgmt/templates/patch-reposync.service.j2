@@ -1,0 +1,10 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Sync Red Hat CDN repositories into the local mirror
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/patch-reposync.sh
+TimeoutStartSec=12h

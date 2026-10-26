@@ -67,7 +67,7 @@ locals {
         source        = ["aws.ssm"]
         "detail-type" = ["EC2 Automation Execution Status-change Notification"]
         detail = {
-          Definition = values(local.document_names)
+          Definition = [for k, doc in local.document_names : doc if k != "collect_compliance"]
           Status     = ["Success", "Failed", "TimedOut", "Cancelled"]
         }
       })

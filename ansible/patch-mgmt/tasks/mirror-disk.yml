@@ -1,0 +1,63 @@
+---
+# repository / infra: ミラー用データディスク(VMを作り直しても残るqcow2)を /var/www/html/repos にマウントする
+- name: Check that the mirror data disk is attached
+  ansible.builtin.stat:
+    path: /dev/disk/by-id/virtio-mirror-data
+  register: mirror_disk
+
+- name: Fail when the mirror data disk is missing
+  ansible.builtin.assert:
+    that:
+      - mirror_disk.stat.exists
+    fail_msg: ミラー用データディスク(シリアル mirror-data)が見つかりません。KVMホストで virsh domblklist を確認してください
+
+- name: Look for a filesystem on the mirror data disk
+  ansible.builtin.command: blkid -s UUID -o value /dev/disk/by-id/virtio-mirror-data
+  register: mirror_disk_uuid
+  changed_when: false
+  failed_when: mirror_disk_uuid.rc not in [0, 2]
+
+# 初めて使うディスクだけフォーマットする(VMを作り直したときは既存のデータをそのまま使う)
+- name: Format the mirror data disk
+  ansible.builtin.command: mkfs.xfs /dev/disk/by-id/virtio-mirror-data
+  when: mirror_disk_uuid.stdout | length == 0
+  changed_when: true
+
+- name: Read the filesystem UUID
+  ansible.builtin.command: blkid -s UUID -o value /dev/disk/by-id/virtio-mirror-data
+  register: mirror_fs_uuid
+  changed_when: false
+
+- name: Create the mount point
+  ansible.builtin.file:
+    path: /var/www/html/repos
+    state: directory
+    mode: "0755"
+
+- name: Mount the mirror data disk on boot
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    regexp: '\s/var/www/html/repos\s'
+    line: "UUID={{ mirror_fs_uuid.stdout }} /var/www/html/repos xfs defaults,nofail 0 2"
+  notify: Reload systemd
+
+- name: Apply the fstab change to systemd
+  ansible.builtin.meta: flush_handlers
+
+# fstabの行からsystemdが生成するマウントユニットを起動する(マウント済みなら何もしない)
+- name: Mount the mirror data disk
+  ansible.builtin.systemd:
+    name: var-www-html-repos.mount
+    state: started
+
+- name: Create the mirror directory
+  ansible.builtin.file:
+    path: /var/www/html/repos/rhel
+    state: directory
+    mode: "0755"
+
+# 新しいファイルシステムのルートにはhttpd用のSELinuxラベルが付いていないので付け直す
+- name: Restore the SELinux labels of the mirror
+  ansible.builtin.command: restorecon -Rv /var/www/html/repos
+  register: mirror_restorecon
+  changed_when: mirror_restorecon.stdout | length > 0

@@ -28,3 +28,11 @@ output "notification_topic_arn" {
 output "command_log_group" {
   value = aws_cloudwatch_log_group.patch.name
 }
+
+output "dashboard_urls" {
+  description = "パッチ適用状況のダッシュボード"
+  value = {
+    for k, d in { status = aws_cloudwatch_dashboard.status, history = aws_cloudwatch_dashboard.history } :
+    k => "${local.console_base}/cloudwatch/home?region=${var.aws_region}#dashboards/dashboard/${d.dashboard_name}"
+  }
+}

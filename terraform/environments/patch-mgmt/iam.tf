@@ -112,10 +112,28 @@ resource "aws_iam_role_policy" "patch_automation" {
           "ssm:DescribeInstanceInformation",
           "ssm:DescribeInstancePatchStates",
           "ssm:DescribeInstancePatchStatesForPatchGroup",
+          "ssm:DescribeInstancePatches",
           "ssm:DescribeMaintenanceWindowExecutions",
           "ssm:GetAutomationExecution",
+          "ssm:ListTagsForResource",
         ]
         Resource = "*"
+      },
+      {
+        # ダッシュボード用の集計Runbook(CollectPatchCompliance)の書き出し先
+        Sid      = "WriteComplianceLogs"
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+        Resource = "${aws_cloudwatch_log_group.compliance.arn}:*"
+      },
+      {
+        Sid      = "WriteComplianceMetrics"
+        Effect   = "Allow"
+        Action   = "cloudwatch:PutMetricData"
+        Resource = "*"
+        Condition = {
+          StringEquals = { "cloudwatch:namespace" = local.metric_namespace }
+        }
       },
       {
         # メンテナンスウィンドウのAUTOMATIONタスクから、このスタックのRunbookだけを起動できる

@@ -1,0 +1,158 @@
+schemaVersion: '0.3'
+description: |-
+  パッチの準拠状況と、未適用パッチのCVEを集めてダッシュボード用に書き出す(EventBridge Schedulerから1時間ごとに実行)。
+    - CloudWatch Logs: ノードごとの状態(record=node)と、未適用・失敗・再起動待ちのパッチ(record=patch、CVE ID付き)
+    - CloudWatch メトリクス: 環境(Envタグ)ごとの不足・失敗・再起動待ちの件数(推移のグラフ用)
+assumeRole: '{{ AutomationAssumeRole }}'
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: このRunbookが引き受けるIAMロールのARN
+    default: ${automation_role_arn}
+  PatchGroups:
+    type: String
+    description: 集計するパッチグループ(カンマ区切り)
+    default: ${patch_groups}
+  LogGroupName:
+    type: String
+    description: 書き出し先のロググループ
+    default: ${log_group_name}
+  MetricNamespace:
+    type: String
+    description: 書き出し先のメトリクスの名前空間
+    default: ${metric_namespace}
+mainSteps:
+  - name: CollectPatchCompliance
+    action: aws:executeScript
+    timeoutSeconds: 300
+    onFailure: Abort
+    inputs:
+      Runtime: python3.11
+      Handler: handler
+      InputPayload:
+        PatchGroups: '{{ PatchGroups }}'
+        LogGroupName: '{{ LogGroupName }}'
+        MetricNamespace: '{{ MetricNamespace }}'
+      Script: |-
+        import datetime
+        import json
+        import time
+
+        import boto3
+
+        # CVE IDはMissing/Failedのパッチにしか付かないが、再起動待ちも「まだ効いていない」ので一緒に出す
+        PATCH_STATES = ["Missing", "Failed", "InstalledPendingReboot"]
+
+
+        def node_info(ssm):
+            """マネージドノードID => 名前・エージェントの状態・タグ"""
+            nodes = {}
+            for page in ssm.get_paginator("describe_instance_information").paginate():
+                for info in page["InstanceInformationList"]:
+                    node_id = info["InstanceId"]
+                    resource_type = "ManagedInstance" if node_id.startswith("mi-") else "EC2Instance"
+                    try:
+                        tag_list = ssm.list_tags_for_resource(ResourceType=resource_type, ResourceId=node_id)["TagList"]
+                    except Exception:
+                        tag_list = []
+                    tags = {t["Key"]: t["Value"] for t in tag_list}
+                    nodes[node_id] = {
+                        "name": tags.get("Name") or info.get("Name") or info.get("ComputerName") or node_id,
+                        "ping": info.get("PingStatus"),
+                        "env": tags.get("Env", ""),
+                        "app": tags.get("App", ""),
+                    }
+            return nodes
+
+
+        def handler(events, context):
+            ssm = boto3.client("ssm")
+            logs = boto3.client("logs")
+            cloudwatch = boto3.client("cloudwatch")
+            groups = [g for g in events["PatchGroups"].split(",") if g]
+            collected_at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            nodes = node_info(ssm)
+            records = []
+            env_totals = {}
+
+            for group in groups:
+                pages = ssm.get_paginator("describe_instance_patch_states_for_patch_group").paginate(PatchGroup=group)
+                for state in [s for page in pages for s in page["InstancePatchStates"]]:
+                    node_id = state["InstanceId"]
+                    node = nodes.get(node_id, {"name": node_id, "ping": None, "env": "", "app": ""})
+                    common = {
+                        "collected_at": collected_at,
+                        "patch_group": group,
+                        "env": node["env"] or group.split("-")[-1],
+                        "app": node["app"],
+                        "name": node["name"],
+                        "node_id": node_id,
+                    }
+                    counts = {
+                        "installed": state.get("InstalledCount", 0) + state.get("InstalledOtherCount", 0),
+                        "missing": state.get("MissingCount", 0),
+                        "failed": state.get("FailedCount", 0),
+                        "pending_reboot": state.get("InstalledPendingRebootCount", 0),
+                        "security_noncompliant": state.get("SecurityNonCompliantCount", 0),
+                        "critical_noncompliant": state.get("CriticalNonCompliantCount", 0),
+                    }
+                    end_time = state.get("OperationEndTime")
+                    records.append({
+                        "record": "node",
+                        **common,
+                        **counts,
+                        "compliant": counts["missing"] + counts["failed"] + counts["pending_reboot"] == 0,
+                        "agent": node["ping"],
+                        "last_operation": state.get("Operation"),
+                        "last_operation_end": end_time.isoformat() if end_time else None,
+                    })
+                    totals = env_totals.setdefault(common["env"], {"missing": 0, "failed": 0, "pending_reboot": 0})
+                    for key in totals:
+                        totals[key] += counts[key]
+
+                    patches = ssm.get_paginator("describe_instance_patches").paginate(
+                        InstanceId=node_id, Filters=[{"Key": "State", "Values": PATCH_STATES}])
+                    for patch in [p for page in patches for p in page["Patches"]]:
+                        records.append({
+                            "record": "patch",
+                            **common,
+                            "title": patch.get("Title"),
+                            "kb_id": patch.get("KBId"),
+                            "classification": patch.get("Classification"),
+                            "severity": patch.get("Severity"),
+                            "state": patch.get("State"),
+                            "cves": patch.get("CVEIds", ""),
+                        })
+
+            # ログ(ダッシュボードの表)
+            stream = "collector-" + collected_at[:10]
+            try:
+                logs.create_log_stream(logGroupName=events["LogGroupName"], logStreamName=stream)
+            except logs.exceptions.ResourceAlreadyExistsException:
+                pass
+            now_ms = int(time.time() * 1000)
+            log_events = [{"timestamp": now_ms, "message": json.dumps(r, ensure_ascii=False)} for r in records]
+            for i in range(0, len(log_events), 500):
+                logs.put_log_events(
+                    logGroupName=events["LogGroupName"], logStreamName=stream, logEvents=log_events[i:i + 500])
+
+            # メトリクス(ダッシュボードの推移グラフ)
+            metric_names = {"missing": "MissingPatches", "failed": "FailedPatches", "pending_reboot": "PendingRebootPatches"}
+            metric_data = [
+                {"MetricName": metric_names[key], "Dimensions": [{"Name": "Env", "Value": env}], "Value": value, "Unit": "Count"}
+                for env, totals in env_totals.items()
+                for key, value in totals.items()
+            ]
+            for i in range(0, len(metric_data), 500):
+                cloudwatch.put_metric_data(Namespace=events["MetricNamespace"], MetricData=metric_data[i:i + 500])
+
+            return {
+                "summary": f"{sum(1 for r in records if r['record'] == 'node')} nodes, "
+                           f"{sum(1 for r in records if r['record'] == 'patch')} patches"
+            }
+    outputs:
+      - Name: Summary
+        Selector: $.Payload.summary
+        Type: String
+outputs:
+  - CollectPatchCompliance.Summary

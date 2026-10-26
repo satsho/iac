@@ -6,13 +6,14 @@
 あわせて、Red Hat CDN → 社内リポジトリ → ミラー → 業務サーバ、という
 **リポジトリ更新の流れ**そのものを検証する。
 
-サーバ(RHEL 10.2 × 5台)は **家のサーバの KVM 上の VM** として作り、
-**SSM Hybrid Activation** で Systems Manager に登録して AWS から管理する。
+サーバ(RHEL 10.2 × 5台)は **家のサーバの KVM 上の VM** として Image Builder の ISO から作り、
+**SSM Hybrid Activation** で Systems Manager に登録して AWS から管理する。VM の中の設定は
+Ansible が SSH で行い、人が入るときも SSH(外出先からは Tailscale 経由)を使う。
 
 | 置き場所 | 中身 | 実行方法 |
 |---|---|---|
 | `terraform/environments/patch-mgmt/`(ここ) | AWS側: パッチベースライン・メンテナンスウィンドウ・Runbook・通知・VM用IAMロール | GitHub Actions(`terraform-patch-mgmt.yml`) |
-| [`ansible/patch-mgmt/`](../../../ansible/patch-mgmt/README.md) | 家のサーバ側: libvirtネットワーク・VM・cloud-init(リポジトリ同期・プロキシ・SSM登録) | 家のサーバで `ansible-playbook` |
+| [`ansible/patch-mgmt/`](../../../ansible/patch-mgmt/README.md) | 家のサーバ側: libvirtネットワーク・VM(ISOからインストール)・VMの中の設定(リポジトリ同期・プロキシ・SSM登録) | 家のサーバで `ansible-playbook` |
 
 ## 全体構成
 
@@ -39,7 +40,8 @@ Red Hat CDN (cdn.redhat.com / EUS 10.2)
 
 Systems Manager(Fleet Manager / Patch Manager / メンテナンスウィンドウ / Automation)
   各VMは Hybrid Activation で mi-xxxxxxxx のマネージドノードとして登録される
-  └ 結果は EventBridge → SNS(メール)
+  ├ 結果は EventBridge → SNS(メール)
+  └ 準拠状況・CVE・実行履歴は CloudWatch ダッシュボード(1時間ごとに集計)
 ```
 
 | ファイル | 内容 |
@@ -49,14 +51,15 @@ Systems Manager(Fleet Manager / Patch Manager / メンテナンスウィンド�
 | `maintenance_window.tf` | メンテナンスウィンドウ・ターゲット・タスク |
 | `automation.tf` / `documents/` | ゲート付きパッチ適用、手動再起動、緊急パッチの各Runbook |
 | `notification.tf` | EventBridge → SNS の結果通知、Run Command出力のロググループ |
+| `dashboard.tf` / `documents/collect-patch-compliance.yaml` | 準拠状況・CVEの集計(1時間ごと)と CloudWatch ダッシュボード |
 
 ## 最初に押さえておく前提
 
 ### 1. VMはSSM Hybrid Activationで登録する(家のサーバ本体と同じ仕組み)
 
 EC2 ではないので、インスタンスプロファイルの代わりに **アクティベーション** で SSM に登録する。
-Ansible が VM を作るたびに、その VM 専用のアクティベーション(登録1回限り)をタグ付きで作り、
-cloud-init の中で `amazon-ssm-agent -register` する。
+Ansible が SSM Agent をまだ登録していない VM を見つけると、その VM 専用のアクティベーション
+(登録1回限り)をタグ付きで作り、SSH で `amazon-ssm-agent -register` する。
 
 - アクティベーションに付けたタグは、登録したノードにそのまま付く。
   例: `patch-test` 用のアクティベーションに `Env=test, PatchGroup=rhel10-test` を付けると、
@@ -64,16 +67,15 @@ cloud-init の中で `amazon-ssm-agent -register` する。
 - VM が引き受けるロールは家のサーバ本体のもの(`environments/dns` の `ssm-hybrid-activation`、
   Route53 などの権限付き)とは分けて、`iac-poc-patch-hybrid-node-role`(SSM とログ出力だけ)にしている
 - 家のサーバ本体には `PatchGroup` タグが無いので、このスタックのスキャンやパッチ適用の対象にはならない
+- アクティベーションのタグは登録時にしか付かないので、Ansible は流すたびに `vars.yml` のタグで
+  マネージドノードのタグを上書きする(タグの正は `vars.yml`)
 
-### 2. Session Manager は有料の advanced-instances tier が必要
+### 2. Session Manager は使わず SSH で管理する
 
-EC2 以外のノードに Session Manager でつなぐには **advanced-instances tier** が必要
-(ノード数 × 時間で課金)。Patch Manager・Run Command・メンテナンスウィンドウ・Automation は
-無料の standard tier で使えるので、この検証は standard のまま進められる。
-
-tier は **アカウント・リージョン単位の設定** なので、advanced にすると家のサーバ本体も
-課金対象になる点に注意。VM の中に入るときは、家のサーバから SSH(`cloud-user`)するか
-`virsh console` を使う。
+EC2 以外のノードに Session Manager でつなぐには有料の **advanced-instances tier** が必要になる
+(アカウント・リージョン単位の設定なので、家のサーバ本体も課金対象になる)。この検証では使わず、
+**SSH**(家のサーバを踏み台にする。外出先からは Tailscale で家のサーバに入る)で管理する。
+Patch Manager・Run Command・メンテナンスウィンドウ・Automation は無料の standard tier で使える。
 
 ### 3. 業務VMは「外に出られない」+「プロキシで必要な宛先だけ通す」
 
@@ -95,26 +97,29 @@ SSM が使えなくなるため。
 
 ### 4. サブスクリプションとEUS
 
-KVM 上の VM は PAYG ではないので、5台とも自分の Red Hat アカウントの activation key で
-RHSM に登録する(Developer Subscription for Individuals なら16台まで)。
-業務VMも登録はするが、`manage_repos=0` にして CDN のリポジトリは使わせない。
+KVM 上の VM は PAYG ではないので、5台とも自分の Red Hat アカウントで RHSM に登録する
+(Developer Subscription for Individuals なら16台まで)。
+
+- repository / infra: ISO の自動登録で登録される(外に出られるので)
+- 業務VM: 初回起動時は外に出られず ISO の自動登録が失敗するので、Ansible が infra のプロキシ経由で
+  登録し直す。登録はするが `manage_repos=0` にして、CDN のリポジトリは使わせない
 
 **EUS がそのサブスクリプションに含まれているかは未確認**。構築後に repository で確認する:
 
 ```bash
-ssh cloud-user@192.168.150.10        # 家のサーバから
+ssh patch-repository        # ansible/patch-mgmt/README.md の ~/.ssh/config の例を参照
 sudo subscription-manager repos --list | grep -A3 -i eus
-sudo tail -50 /var/log/cloud-init-output.log   # user-data が途中で失敗していないか
 ```
 
-EUS が見えない場合は、`ansible/patch-mgmt/vars.yml` の `upstream_repos` を
-`rhel-10-for-x86_64-baseos-rpms` / `rhel-10-for-x86_64-appstream-rpms` に変えて
-repository と infra を作り直す(`rhel_release: "10.2"` のままなら 10.2 時点のコンテンツに固定される)。
+EUS が見えない場合は Ansible の「Enable only the repositories that are mirrored」で失敗する。
+`ansible/patch-mgmt/vars.yml` の `upstream_repos` を `rhel-10-for-x86_64-baseos-rpms` /
+`rhel-10-for-x86_64-appstream-rpms` に変えて流し直す(`rhel_release: "10.2"` のままなら
+10.2 時点のコンテンツに固定される)。
 
-### 5. ゲストイメージは 10.2 を使う
+### 5. ISO は 10.2 で作る
 
-ミラーは EUS 10.2 なので、10.3 以降のイメージで業務VMを作ると「ミラーの方が古い」状態になり
-更新できない。Red Hat Customer Portal から **RHEL 10.2 の KVM Guest Image** を使う。
+ミラーは EUS 10.2 なので、10.3 以降で業務VMを作ると「ミラーの方が古い」状態になり
+更新できない。Image Builder の ISO は **RHEL 10.2** で作る。
 また RHEL 10 は CPU が x86-64-v3(AVX2 など)に対応している必要がある(playbook で確認している)。
 
 ## リポジトリ同期の流れ
@@ -142,7 +147,15 @@ repository と infra を作り直す(`rhel_release: "10.2"` のままなら 10.2
 - **ミラー用データディスクは VM と別の qcow2**: VM を作り直しても、reposync 済みの数十GBを
   CDN から取り直さずに済む。
 
-手動で同期したいとき(初回の構築直後など)は Run Command で実行できる:
+手動で同期したいとき(初回の構築直後など)は、SSH で入って `systemctl start` するか、
+Run Command で実行する:
+
+```bash
+# SSHの場合
+ssh patch-repository 'systemctl status patch-reposync.service --no-pager; cat /var/www/html/repos/rhel/10.2/.last-sync'
+ssh patch-infra 'sudo systemctl start patch-mirror-sync.service'
+```
+
 
 ```bash
 # repositoryの同期状況(初回は数時間かかる)
@@ -332,23 +345,58 @@ patches:
 
 コンプライアンスの判定は引き続きベースライン基準なので、A の方が後から状態を説明しやすい。
 
-## 成功・失敗の管理
+## 成功・失敗の管理とダッシュボード
 
 | どこで見るか | 内容 |
 |---|---|
 | SNS(メール) | EventBridge で拾った以下のイベント |
 | ・メンテナンスウィンドウ | このスタックのウィンドウの実行が SUCCESS / FAILED / TIMED_OUT / CANCELLED で終わった |
 | ・Runbook | ゲート付き適用・手動再起動・緊急パッチの実行が Success / Failed / TimedOut / Cancelled で終わった |
-| ・コンプライアンス | サーバがパッチ非準拠に**変わった**とき(状態が変わった時だけ通知される) |
-| メンテナンスウィンドウの履歴 | ウィンドウ → タスク → サーバごとの結果 |
+| ・コンプライアンス | VMがパッチ非準拠に**変わった**とき(状態が変わった時だけ通知される) |
+| CloudWatch ダッシュボード `iac-poc-patch-status` | いまの状態: VMごとの準拠状況、未適用・失敗・再起動待ちのパッチとCVE |
+| CloudWatch ダッシュボード `iac-poc-patch-history` | 推移と実行履歴: 環境ごとの未適用パッチ数のグラフ、ウィンドウ・Runbookの結果 |
+| Patch Manager の画面 | 標準のダッシュボード・コンプライアンスレポート(パッチごとの詳細) |
 | CloudWatch Logs `/iac-poc-patch/run-command` | AWS-RunPatchBaseline の出力(どのパッケージが入ったか) |
-| Patch Manager のダッシュボード | パッチグループ・サーバごとのコンプライアンス |
+
+### ダッシュボードの仕組み
+
+Patch Manager の標準画面でも準拠状況やパッチごとの CVE は見られるが、「環境ごと(test/stg/prod)に
+並べる」「CVE を全VM分まとめて一覧する」「推移を見る」はできないので、集計して CloudWatch に
+ダッシュボードを作っている。
+
+```
+EventBridge Scheduler(毎時10分)
+  └ Runbook CollectPatchCompliance
+      ├ Patch Manager の API でVMごとの件数と、未適用・失敗・再起動待ちのパッチ(CVE ID付き)を取得
+      ├ CloudWatch Logs /iac-poc-patch/compliance に1行1レコードで書く → ダッシュボードの表
+      └ CloudWatch メトリクス(Env 別の件数)を書く                    → ダッシュボードのグラフ
+EventBridge(ウィンドウ・Runbook・コンプライアンスのイベント)
+  └ CloudWatch Logs /iac-poc-patch/events にそのまま書く              → 実行履歴の表
+```
+
+例: 月曜に `openssl-libs` の RHSA が出て、その週のウィンドウで順に当たる場合
+(status ダッシュボードの「未適用・失敗・再起動待ちのパッチとCVE」の見え方)
+
+| 時刻 | 何が起きるか | ダッシュボードの表 |
+|---|---|---|
+| 火 01:30 | 全台のスキャンで未適用を検出 | 02:10 の集計で test / stg / prod に `openssl-libs ... / Missing / Important / CVE-2026-xxxx` が出る |
+| 火 02:00 | test-weekly が test に適用(結果は Patch Manager に報告される) | 次の集計で test の行が消える |
+| 水 02:00 | stg-weekly が stg に適用 | 次の集計で stg の行が消える |
+| 金 02:00 | prod-weekly が prod に適用(再起動は手動) | prod の行は `InstalledPendingReboot` に変わって残る |
+| 金 日中 | 運用者が `RebootAndScan` を実行 | 次の集計で prod の行も消える |
+
+CVE ID は Patch Manager の仕様で **未適用(Missing)と失敗(Failed)のパッチにだけ** 付く。
+再起動待ちのパッチは CVE 欄が空になる。
+
+status ダッシュボードは「直近1時間」で見る前提にしている。範囲を広げると、その後に適用されて
+消えたパッチも古い行として残って見える(`CollectedAt` 列で集計時刻が分かる)。
 
 ## 構築手順
 
-1. **Terraform 実行ロールに権限を足す**: この環境は SSM・EventBridge・SNS・CloudWatch Logs を
-   作るので、`terraform/iam/terraform-role.yaml` の `github-actions-terraform` ロールに
-   `ssm:*` / `events:*` / `sns:*` / `logs:*` が必要(今回の変更には含めていない)
+1. **Terraform 実行ロールに権限を足す**: この環境は SSM・EventBridge(ルールと Scheduler)・SNS・
+   CloudWatch(Logs・ダッシュボード・メトリクス)を作るので、`terraform/iam/terraform-role.yaml` の
+   `github-actions-terraform` ロールに `ssm:*` / `events:*` / `scheduler:*` / `sns:*` / `logs:*` /
+   `cloudwatch:*` が必要(今回の変更には含めていない)
 2. GitHub Variables に `PATCH_NOTIFICATION_EMAIL`(通知先メールアドレス、任意)を設定する
 3. `Terraform Patch Management (patch-mgmt)` ワークフローを `plan` → `apply` で実行
 4. SNS から届く確認メールのリンクを踏む
@@ -356,12 +404,12 @@ patches:
 6. Fleet Manager に5台(`mi-...`)が表示され、タグが付いていることを確認する
 7. repository の EUS リポジトリと reposync の進み具合を確認する(「前提 4.」「リポジトリ同期の流れ」)
 8. reposync が終わったら infra に同期させる(「リポジトリ同期の流れ」のコマンド)
-9. State Manager の関連付け `iac-poc-patch-daily-scan` を「今すぐ適用」し、
-   Patch Manager のダッシュボードにコンプライアンスが出ることを確認する
+9. State Manager の関連付け `iac-poc-patch-daily-scan` を「今すぐ適用」し、Patch Manager の画面と、
+   次の毎時10分以降に `iac-poc-patch-status` ダッシュボードにコンプライアンスが出ることを確認する
 10. 業務VMがミラーだけを使い、CDN には出られないことを確認する
 
 ```bash
-ssh cloud-user@192.168.151.21        # 家のサーバから patch-test へ
+ssh patch-test
 dnf repolist                         # infra-baseos / infra-appstream だけが有効
 dnf updateinfo list --security       # Security アドバイザリが見えればupdateinfoも同期できている
 curl -m 5 -sI --proxy http://192.168.151.11:3128 https://cdn.redhat.com   # 403(プロキシが拒否)
@@ -371,10 +419,10 @@ curl -m 5 -sI https://cdn.redhat.com # 直接は経路が無いので失敗す�
 ## コストと後片付け
 
 AWS 側は standard tier の SSM・メンテナンスウィンドウ・Automation・EventBridge・SNS・CloudWatch Logs
-だけなので、ほぼ無料枠に収まる(Session Manager を使うために advanced-instances tier にした場合だけ
-ノード数 × 時間の課金がかかる)。
+が中心で、ほぼ無料枠に収まる。ダッシュボード用のカスタムメトリクスは 3種類 × 環境4つ = 12個
+(最初の10個は無料枠)なので少額。CloudWatch ダッシュボードは3つまで無料で、ここでは2つ使う。
 
-家のサーバ側はメモリ 2GB × 5台と、ミラー用データディスク(repository と infra に同じ中身が入るので
+家のサーバ側はメモリ 14GB と、ミラー用データディスク(repository と infra に同じ中身が入るので
 同期したリポジトリのサイズ × 2)を使う。VM を消すときは `ansible/patch-mgmt/destroy.yml` を使うと、
 SSM のマネージドノードと RHSM の登録も一緒に解除される。
 
@@ -382,12 +430,12 @@ SSM のマネージドノードと RHSM の登録も一緒に解除される。
 
 | サービス | 使いどころ | 優先度 |
 |---|---|---|
-| Red Hat Insights(console.redhat.com) | RHSM に登録した VM の CVE・推奨対応を一覧できる(サブスクリプションに含まれる)。「緊急パッチが要るか」の判断材料になる。Amazon Inspector のドキュメントは EC2 を対象にしており、オンプレの VM はスキャン対象外とみられる(要確認)ので、こちらが代わりになる。業務VMで使う場合はプロキシの許可先に Insights の宛先を足す | 高 |
+| CloudWatch アラーム | ダッシュボードのメトリクスを使い、「prod の未適用パッチが7日以上0にならない」などを通知する | 中 |
+| Red Hat Insights(console.redhat.com) | RHSM に登録した VM の CVE・推奨対応を一覧できる(サブスクリプションに含まれる)。Patch Manager の CVE は「未適用のパッチがあるもの」だけだが、Insights は「その CVE が影響するか・修正があるか」の観点で見られる。ISO の自動登録で Insights にもつながっていれば repository / infra はそのまま使える(業務VMはプロキシの許可先に Insights の宛先を足す必要がある)。Amazon Inspector はオンプレの VM は対象外とみられる(要確認) | 中 |
 | AWS Config(`ec2-managedinstance-patch-compliance-status-check`) | パッチ準拠状況の**履歴**を残す。監査で「いつ時点で準拠していたか」を示せる。ハイブリッドのノードも記録できるかは要確認 | 中 |
 | Change Calendar(Systems Manager) | 年末年始などの変更凍結期間を定義し、その間はパッチ適用を止める | 中 |
-| Inventory + Resource Data Sync → Athena | 全VMのパッケージ一覧を S3 に集約し、「この kernel が入っているVM」を SQL で引ける | 中 |
-| Patch Manager のコンプライアンスレポート | 準拠状況を CSV で定期的に S3 に出力する(報告書向け) | 中 |
-| Resource Groups | タグ条件に名前を付けて(例: `prod-app-a`)、メンテナンスウィンドウや Run Command のターゲットに使い回す | 中 |
+| Inventory + Resource Data Sync → Athena | 全VMのパッケージ一覧を S3 に集約し、「この kernel が入っているVM」を SQL で引ける。ダッシュボードを Grafana(家の k3s)や QuickSight で作り込みたくなったときのデータ源にもなる | 低 |
+| Resource Groups | タグ条件に名前を付けて(例: `prod-app-a`)、メンテナンスウィンドウや Run Command のターゲットに使い回す | 低 |
 | 適用前の VM スナップショット | 失敗時の切り戻し手段。KVM ホストで `virsh snapshot-create-as` を取ってから当てる(家のサーバ本体も SSM 管理下なので、Run Command で実行できる) | 中 |
 | Step Functions + EventBridge Scheduler | 「test 成功のイベントから**ちょうど1日後**に stg を流す」のようなイベント駆動の昇格 | 低(今回は曜日固定で代替) |
 
@@ -398,8 +446,8 @@ Systems Manager **Change Manager** は 2025/11/7 以降、新規の利用受付�
 
 - 使っているサブスクリプションに EUS が含まれるか → 含まれなければ非EUSで進めるか
 - 承認の考え方: 承認日数(日付基準)のままでよいか、ミラーの週1凍結や `approve_until_date` で「同じパッチを順番に流す」形にするか
-- Session Manager を使うために advanced-instances tier にするか(家のサーバ本体も課金対象になる)
 - 再起動パターンの割り当て: 今は test/stg が自動、prod が手動
 - アプリ単位のウィンドウのタグ設計: `App` タグで分けるか、`MaintenanceWindow=weekday-night` のようにウィンドウ名をタグに直接持たせるか
 - 緊急パッチの承認者と、Runbook を実行できる人(IAM)の範囲
 - 通知先: メールのままか、Slack(Amazon Q Developer in chat applications)に流すか
+- ダッシュボードで足りない観点(例: アプリ別、CVE ごとに影響VMを並べる)

@@ -1,0 +1,129 @@
+---
+# 全VM共通: SSM AgentをインストールしてHybrid Activationで登録し、タグを同期する。
+# 業務VMは vm_proxy_env(infraのプロキシ)経由でAWSに出る。
+- name: Check whether the SSM Agent is already registered
+  ansible.builtin.stat:
+    path: /var/lib/amazon/ssm/registration
+  register: ssm_registration
+
+- name: Install and register the SSM Agent
+  when: not ssm_registration.stat.exists
+  block:
+    - name: Download the SSM Agent
+      ansible.builtin.get_url:
+        url: "https://amazon-ssm-{{ aws_region }}.s3.{{ aws_region }}.amazonaws.com/latest/linux_amd64/amazon-ssm-agent.rpm"
+        dest: /tmp/amazon-ssm-agent.rpm
+        mode: "0644"
+      environment: "{{ vm_proxy_env }}"
+
+    - name: Install the SSM Agent
+      ansible.builtin.dnf:
+        name: /tmp/amazon-ssm-agent.rpm
+        disablerepo: "*"
+        state: present
+
+    # VMごとに使い捨てのアクティベーション(登録1回限り、既定で24時間で失効)を作る。
+    # AWS CLIはplaybookを実行したユーザーの認証情報で動かす(KVMホストのrootの認証情報は使わない)。
+    - name: Create a single-use SSM activation for this VM
+      ansible.builtin.command:
+        argv:
+          - aws
+          - ssm
+          - create-activation
+          - --region
+          - "{{ aws_region }}"
+          - --iam-role
+          - "{{ ssm_hybrid_role }}"
+          - --default-instance-name
+          - "{{ vm.name }}"
+          - --description
+          - "patch-mgmt lab VM {{ vm.name }}"
+          - --registration-limit
+          - "1"
+          - --tags
+          - "{{ vm_tags | dict2items(key_name='Key', value_name='Value') | to_json }}"
+          - --output
+          - json
+      delegate_to: localhost
+      connection: local
+      become: false
+      register: ssm_activation
+      changed_when: true
+      no_log: true
+
+    - name: Stop the SSM Agent before registering
+      ansible.builtin.systemd:
+        name: amazon-ssm-agent
+        state: stopped
+
+    - name: Register the VM with Systems Manager
+      ansible.builtin.command:
+        argv:
+          - amazon-ssm-agent
+          - -register
+          - -code
+          - "{{ (ssm_activation.stdout | from_json).ActivationCode }}"
+          - -id
+          - "{{ (ssm_activation.stdout | from_json).ActivationId }}"
+          - -region
+          - "{{ aws_region }}"
+      environment: "{{ vm_proxy_env }}"
+      changed_when: true
+      no_log: true
+
+    - name: Remove the downloaded SSM Agent package
+      ansible.builtin.file:
+        path: /tmp/amazon-ssm-agent.rpm
+        state: absent
+
+# SSM Agent本体と、そこから実行されるAWS-RunPatchBaselineにもプロキシを使わせる(業務VMのみ)
+- name: Create the drop-in directory for the SSM Agent
+  ansible.builtin.file:
+    path: /etc/systemd/system/amazon-ssm-agent.service.d
+    state: directory
+    mode: "0755"
+  when: vm_proxy_env | length > 0
+
+- name: Route the SSM Agent through the infra proxy
+  ansible.builtin.template:
+    src: ssm-agent-proxy.conf.j2
+    dest: /etc/systemd/system/amazon-ssm-agent.service.d/proxy.conf
+    mode: "0644"
+  when: vm_proxy_env | length > 0
+  notify:
+    - Reload systemd
+    - Restart amazon-ssm-agent
+
+- name: Apply the SSM Agent settings now
+  ansible.builtin.meta: flush_handlers
+
+- name: Start the SSM Agent
+  ansible.builtin.systemd:
+    name: amazon-ssm-agent
+    enabled: true
+    state: started
+
+- name: Read the managed node ID
+  ansible.builtin.slurp:
+    src: /var/lib/amazon/ssm/registration
+  register: ssm_registration_file
+
+# アクティベーションのタグは登録時にしか付かないので、vars.yml のタグを毎回マネージドノードに上書きする
+- name: Sync the tags of the managed node with vars.yml
+  ansible.builtin.command:
+    argv:
+      - aws
+      - ssm
+      - add-tags-to-resource
+      - --region
+      - "{{ aws_region }}"
+      - --resource-type
+      - ManagedInstance
+      - --resource-id
+      - "{{ (ssm_registration_file.content | b64decode | from_json).ManagedInstanceID }}"
+      - --tags
+      - "{{ vm_tags | dict2items(key_name='Key', value_name='Value') | to_json }}"
+  delegate_to: localhost
+  connection: local
+  become: false
+  changed_when: false

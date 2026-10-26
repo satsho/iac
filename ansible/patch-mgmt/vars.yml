@@ -11,15 +11,27 @@ ssm_hybrid_role: iac-poc-patch-hybrid-node-role
 # KVMホスト
 # ---------------------------------------------------------------------------
 
-# VMのディスク・cloud-initのseed ISOを置く場所
+# VMのディスクを置く場所
 libvirt_image_dir: /var/lib/libvirt/images/patch-mgmt
-# Red Hat Customer Portalからダウンロードした「Red Hat Enterprise Linux 10.2 KVM Guest Image」(qcow2)。
-# 各VMのルートディスクはこれをバッキングファイルにした差分ディスクになる。
-rhel_base_image: /var/lib/libvirt/images/rhel-10.2-x86_64-kvm.qcow2
+# RHEL Image Builderで作ったインストーラISO(RHEL 10.2、Red Hatへの自動登録あり、ユーザーsho)。
+# 無人インストールで「最初のディスク」をフォーマットする。
+rhel_install_iso: /var/lib/libvirt/images/rhel-10.2-patch-mgmt.iso
 # virt-install --os-variant に渡す値(osinfo-query os | grep rhel10 で確認)
 os_variant: rhel10.0
-# VMのデフォルトユーザー(cloud-user)に登録するSSH公開鍵
-ssh_authorized_keys: []
+root_disk_size_gb: 20
+
+# ---------------------------------------------------------------------------
+# VMへのSSH
+# ---------------------------------------------------------------------------
+
+# ISOで作ったユーザー(wheel)。初回はパスワードで入るので -k(--ask-pass)を付けて実行する
+vm_user: sho
+# 初回にVMへ登録する公開鍵(playbookを実行するユーザーのもの)
+ssh_public_key_file: "~/.ssh/id_ed25519.pub"
+# 鍵を登録したあと、パスワードでのSSHログインを止める(コンソールからはパスワードで入れる)
+ssh_password_authentication: false
+# VMは作り直すとホスト鍵が変わるので、普段のknown_hostsとは分けておく(destroy.ymlで消す)
+ssh_known_hosts_file: "~/.ssh/known_hosts_patch_mgmt"
 
 # ---------------------------------------------------------------------------
 # ネットワーク
@@ -27,20 +39,23 @@ ssh_authorized_keys: []
 # patch-mgmt     : NAT。repository / infra がRed Hat CDNとAWS(SSM)に出るためのネットワーク
 # patch-workload : 隔離(外部へのルーティング無し)。test / stg / prod と infra の2枚目のNIC
 #                  業務VMはinfraのミラー(http)とプロキシ(SSM・RHSMの宛先だけ許可)しか使えない
+# IPアドレスは下の vms の nics を元に、libvirtのDHCPでMACアドレスに固定で払い出す。
 
 libvirt_networks:
   - name: patch-mgmt
     bridge: virbr-patchm
     forward: nat
     address: 192.168.150.1
-    prefix: 24
+    netmask: 255.255.255.0
+    dhcp_range: [192.168.150.100, 192.168.150.199]
   - name: patch-workload
     bridge: virbr-patchw
     forward: none
     address: 192.168.151.1
-    prefix: 24
+    netmask: 255.255.255.0
+    dhcp_range: [192.168.151.100, 192.168.151.199]
 
-# 下の vms の nics と同じ値にしておく(user-dataのrsync先・repoファイル・プロキシ設定に使う)
+# 下の vms の nics と同じ値にしておく(rsyncの許可先・repoファイル・プロキシ設定に使う)
 repository_ip: 192.168.150.10
 infra_mgmt_ip: 192.168.150.11
 infra_workload_ip: 192.168.151.11
@@ -67,50 +82,51 @@ mirror_sync_schedule: "*-*-* 01:00:00"
 # ---------------------------------------------------------------------------
 # VM
 # ---------------------------------------------------------------------------
-# tags は SSM のマネージドノードに付くタグ(Name はVM名が自動で付く)。
+# tags は SSM のマネージドノードに付くタグ(Name はVM名が自動で付く)。playbookを流すたびに同期する。
 # PatchGroup は Terraform の patch_baselines のキー(rhel10-<キー>)と一致させること。
 # data_size_gb があるVMには、VMを作り直しても消えないミラー用データディスクを付ける。
+# nics の1つ目のアドレスに、KVMホストからSSHする。
 
 vms:
   - name: patch-repository
     role: repository
-    memory_mb: 2048
+    memory_mb: 4096
     vcpus: 2
-    data_size_gb: 100
+    data_size_gb: 150
     nics:
-      - { network: patch-mgmt, mac: "52:54:00:15:00:10", address: 192.168.150.10, gateway: true }
+      - { network: patch-mgmt, mac: "52:54:00:15:00:10", address: 192.168.150.10 }
     tags: { Role: repository, Env: mgmt, App: repo-mirror, PatchGroup: rhel10-mgmt, RebootPolicy: manual }
 
   - name: patch-infra
     role: infra
-    memory_mb: 2048
+    memory_mb: 4096
     vcpus: 2
-    data_size_gb: 100
+    data_size_gb: 150
     nics:
-      - { network: patch-mgmt, mac: "52:54:00:15:00:11", address: 192.168.150.11, gateway: true }
-      - { network: patch-workload, mac: "52:54:00:15:01:11", address: 192.168.151.11, gateway: false }
+      - { network: patch-mgmt, mac: "52:54:00:15:00:11", address: 192.168.150.11 }
+      - { network: patch-workload, mac: "52:54:00:15:01:11", address: 192.168.151.11 }
     tags: { Role: infra, Env: mgmt, App: repo-mirror, PatchGroup: rhel10-mgmt, RebootPolicy: manual }
 
   - name: patch-test
     role: workload
     memory_mb: 2048
-    vcpus: 1
+    vcpus: 2
     nics:
-      - { network: patch-workload, mac: "52:54:00:15:01:21", address: 192.168.151.21, gateway: false }
+      - { network: patch-workload, mac: "52:54:00:15:01:21", address: 192.168.151.21 }
     tags: { Role: workload, Env: test, App: sample-app, PatchGroup: rhel10-test, RebootPolicy: auto }
 
   - name: patch-stg
     role: workload
     memory_mb: 2048
-    vcpus: 1
+    vcpus: 2
     nics:
-      - { network: patch-workload, mac: "52:54:00:15:01:22", address: 192.168.151.22, gateway: false }
+      - { network: patch-workload, mac: "52:54:00:15:01:22", address: 192.168.151.22 }
     tags: { Role: workload, Env: stg, App: sample-app, PatchGroup: rhel10-stg, RebootPolicy: auto }
 
   - name: patch-prod
     role: workload
     memory_mb: 2048
-    vcpus: 1
+    vcpus: 2
     nics:
-      - { network: patch-workload, mac: "52:54:00:15:01:23", address: 192.168.151.23, gateway: false }
+      - { network: patch-workload, mac: "52:54:00:15:01:23", address: 192.168.151.23 }
     tags: { Role: workload, Env: prod, App: sample-app, PatchGroup: rhel10-prod, RebootPolicy: manual }

@@ -4,6 +4,8 @@ locals {
     gated_patch     = "${local.name}-GatedPatchBaseline"
     reboot_and_scan = "${local.name}-RebootAndScan"
     emergency_patch = "${local.name}-EmergencyPatch"
+    # ダッシュボード用の集計(1時間ごと)。結果の通知は不要なのでEventBridgeの通知対象からは外す
+    collect_compliance = "${local.name}-CollectPatchCompliance"
   }
 }
 

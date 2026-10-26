@@ -1,0 +1,10 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Daily reposync from Red Hat CDN
+
+[Timer]
+OnCalendar={{ reposync_schedule }}
+Persistent=true
+
+[Install]
+WantedBy=timers.target

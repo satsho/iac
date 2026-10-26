@@ -49,13 +49,22 @@
   when: domstate.rc == 0 and 'shut off' not in domstate.stdout
   become: true
 
+# UEFIで作られたVMはNVRAMも消さないとundefineできないので、まず --nvram 付きで試す
 - name: Remove the VM definition - {{ vm.name }}
-  ansible.builtin.command: "virsh undefine {{ vm.name }}"
-  changed_when: true
+  ansible.builtin.command: "virsh undefine --nvram {{ vm.name }}"
+  register: undefine_nvram
+  changed_when: undefine_nvram.rc == 0
+  failed_when: false
   when: domstate.rc == 0
   become: true
 
-- name: Remove the root disk and seed ISO - {{ vm.name }}
+- name: Remove the VM definition without NVRAM - {{ vm.name }}
+  ansible.builtin.command: "virsh undefine {{ vm.name }}"
+  changed_when: true
+  when: domstate.rc == 0 and undefine_nvram.rc != 0
+  become: true
+
+- name: Remove the root disk - {{ vm.name }}
   ansible.builtin.file:
     path: "{{ libvirt_image_dir }}/{{ vm.name }}"
     state: absent
@@ -73,3 +82,11 @@
     argv: [aws, ssm, deregister-managed-instance, --region, "{{ aws_region }}", --instance-id, "{{ item }}"]
   loop: "{{ node_ids.stdout.split() }}"
   changed_when: true
+
+# 作り直すとホスト鍵が変わるので、このVM用のknown_hostsから古い鍵を消しておく
+- name: Forget the SSH host key - {{ vm.name }}
+  ansible.builtin.command:
+    argv: [ssh-keygen, -R, "{{ (vm.nics | first).address }}", -f, "{{ ssh_known_hosts_file | expanduser }}"]
+  register: forget_host_key
+  changed_when: "'updated' in forget_host_key.stdout"
+  failed_when: false

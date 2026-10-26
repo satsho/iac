@@ -1,8 +1,0 @@
-instance-id: {{ vm.name }}-{{ activation.ActivationId }}
-local-hostname: {{ vm.name }}
-{% if ssh_authorized_keys | length > 0 %}
-public-keys:
-{% for key in ssh_authorized_keys %}
-  - {{ key }}
-{% endfor %}
-{% endif %}

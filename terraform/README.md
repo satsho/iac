@@ -476,7 +476,8 @@ Systems Manager Patch Managerによる段階的なパッチ適用(test → stg �
 VM は SSM Hybrid Activation で登録し、AWS 側(パッチベースライン・メンテナンスウィンドウ・
 Runbook・通知)だけをこの Terraform(別state `patch-mgmt/terraform.tfstate`、専用ワークフロー
 `.github/workflows/terraform-patch-mgmt.yml`)で管理する。VM 自体は家のサーバで
-`ansible/patch-mgmt/` の playbook を実行して作る。
+`ansible/patch-mgmt/` の playbook を実行して作り、SSH で設定する。パッチの適用状況とCVEは
+CloudWatch ダッシュボード(`iac-poc-patch-status` / `iac-poc-patch-history`)で見る。
 
 設計(ネットワーク・プロキシ・タグ・パッチベースライン・メンテナンスウィンドウ・ゲート・
 再起動パターン・緊急パッチ)と構築手順は

@@ -1,0 +1,10 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Daily rsync from the repository server
+
+[Timer]
+OnCalendar={{ mirror_sync_schedule }}
+Persistent=true
+
+[Install]
+WantedBy=timers.target

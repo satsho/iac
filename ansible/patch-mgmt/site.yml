@@ -1,0 +1,99 @@
+---
+# 家のサーバ(KVMホスト)上で実行し、パッチ管理検証用のVMを作る。
+#   export AWS_PROFILE=<SSMのアクティベーションを作れるプロファイル>
+#   export RHEL_ORG_ID=... RHEL_ACTIVATION_KEY=...
+#   ansible-playbook -K ansible/patch-mgmt/site.yml
+# すでに存在するVMは作り直さない(設定を変えたいVMは destroy.yml で消してから流し直す)。
+- name: Build the patch management lab on the KVM host
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - vars.yml
+
+  vars:
+    rhel_org_id: "{{ lookup('ansible.builtin.env', 'RHEL_ORG_ID') }}"
+    rhel_activation_key: "{{ lookup('ansible.builtin.env', 'RHEL_ACTIVATION_KEY') }}"
+    # RHEL 10 は x86-64-v3 のCPUが必須(VMにはhost-passthroughでホストのCPU機能をそのまま見せる)
+    x86_64_v3_flags: [avx, avx2, bmi1, bmi2, f16c, fma, abm, movbe, xsave]
+
+  tasks:
+    - name: Check that the Red Hat activation key is provided
+      ansible.builtin.assert:
+        that:
+          - rhel_org_id | length > 0
+          - rhel_activation_key | length > 0
+        fail_msg: 環境変数 RHEL_ORG_ID / RHEL_ACTIVATION_KEY を設定してください
+
+    - name: Check that the required commands are installed
+      ansible.builtin.command: "which {{ item }}"
+      loop: [virsh, virt-install, qemu-img, xorriso, aws]
+      changed_when: false
+
+    - name: Read the host CPU flags
+      ansible.builtin.command: grep -m1 ^flags /proc/cpuinfo
+      register: cpu_flags
+      changed_when: false
+
+    - name: Check that the host CPU supports x86-64-v3
+      ansible.builtin.assert:
+        that:
+          - x86_64_v3_flags | difference(cpu_flags.stdout.split()) | length == 0
+        fail_msg: "RHEL 10 に必要なCPU機能が足りません: {{ x86_64_v3_flags | difference(cpu_flags.stdout.split()) }}"
+
+    - name: Check that the RHEL KVM guest image exists
+      ansible.builtin.stat:
+        path: "{{ rhel_base_image }}"
+      register: base_image
+      become: true
+
+    - name: Fail when the RHEL KVM guest image is missing
+      ansible.builtin.assert:
+        that:
+          - base_image.stat.exists
+        fail_msg: "{{ rhel_base_image }} にRHEL 10.2のKVM Guest Image(qcow2)を置いてください"
+
+    # aws CLI はこのplaybookを実行したユーザーの認証情報(AWS_PROFILE等)で動かし、become しない。
+    # rootの /root/.aws/credentials は家のサーバ自身のHybrid Activationの一時クレデンシャルで、
+    # アクティベーションを作る権限は無い(持たせるべきでもない)。
+    - name: Show which AWS identity creates the activations
+      ansible.builtin.command: aws sts get-caller-identity --query Arn --output text
+      register: aws_identity
+      changed_when: false
+
+    - name: Print the AWS identity
+      ansible.builtin.debug:
+        msg: "SSMのアクティベーションは {{ aws_identity.stdout }} で作成します"
+
+    - name: Create the image directory
+      ansible.builtin.file:
+        path: "{{ libvirt_image_dir }}"
+        state: directory
+        mode: "0711"
+      become: true
+
+    - name: Define and start the libvirt networks
+      ansible.builtin.include_tasks: network.yml
+      loop: "{{ libvirt_networks }}"
+      loop_control:
+        loop_var: net
+        label: "{{ net.name }}"
+
+    - name: Look up the existing VMs
+      ansible.builtin.command: "virsh dominfo {{ item.name }}"
+      loop: "{{ vms }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: existing_vms
+      changed_when: false
+      failed_when: false
+      become: true
+
+    # repository → infra → 業務VM の順に1台ずつ作り、SSMに登録されるまで待ってから次へ進む
+    - name: Create the VMs that do not exist yet
+      ansible.builtin.include_tasks: create-vm.yml
+      loop: "{{ existing_vms.results | selectattr('rc', 'ne', 0) | map(attribute='item') | list }}"
+      loop_control:
+        loop_var: vm
+        label: "{{ vm.name }}"

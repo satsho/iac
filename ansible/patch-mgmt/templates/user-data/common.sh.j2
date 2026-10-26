@@ -1,0 +1,41 @@
+# OSのタイムゾーンをメンテナンスウィンドウと揃えておくと、dnf・journalのログと
+# パッチ適用の時刻を突き合わせやすい。
+timedatectl set-timezone "{{ timezone }}"
+
+{% if vm.role == 'workload' %}
+# 業務VMは外へ直接出られないので、AWS(SSM)とRHSMへの通信はinfraのプロキシを通す。
+# VMは続けて作られるので、infra側のプロキシが起動するまで待つ。
+proxy_url="http://{{ infra_workload_ip }}:{{ proxy_port }}"
+for _ in $(seq 1 90); do
+  timeout 3 bash -c "</dev/tcp/{{ infra_workload_ip }}/{{ proxy_port }}" 2>/dev/null && break
+  sleep 20
+done
+export https_proxy="$proxy_url" http_proxy="$proxy_url" no_proxy="{{ infra_workload_ip }},localhost,127.0.0.1"
+
+{% endif %}
+# SSM Agentをインストールし、Hybrid Activationで登録する(mi-で始まるマネージドノードになる)。
+# アクティベーションは1台につき1回だけ使える使い捨てのもの。
+curl -fsSL -o /tmp/amazon-ssm-agent.rpm \
+  "https://amazon-ssm-{{ aws_region }}.s3.{{ aws_region }}.amazonaws.com/latest/linux_amd64/amazon-ssm-agent.rpm"
+dnf install -y --disablerepo='*' /tmp/amazon-ssm-agent.rpm
+rm -f /tmp/amazon-ssm-agent.rpm
+{% if vm.role == 'workload' %}
+# SSM Agent(とそこから実行されるAWS-RunPatchBaseline)にもプロキシを使わせる。
+# infraのミラー(http)はプロキシを通さずに直接取りに行く。
+mkdir -p /etc/systemd/system/amazon-ssm-agent.service.d
+cat <<EOF > /etc/systemd/system/amazon-ssm-agent.service.d/proxy.conf
+[Service]
+Environment="https_proxy=$proxy_url"
+Environment="http_proxy=$proxy_url"
+Environment="no_proxy=$no_proxy"
+EOF
+systemctl daemon-reload
+{% endif %}
+systemctl stop amazon-ssm-agent || true
+set +x  # アクティベーションコードをcloud-initのログに残さない
+amazon-ssm-agent -register \
+  -code "{{ activation.ActivationCode }}" \
+  -id "{{ activation.ActivationId }}" \
+  -region "{{ aws_region }}"
+set -x
+systemctl enable --now amazon-ssm-agent

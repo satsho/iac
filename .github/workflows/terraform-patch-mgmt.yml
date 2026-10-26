@@ -18,7 +18,6 @@ permissions:
 
 env:
   TF_WORKING_DIR: terraform/environments/patch-mgmt
-  TF_VAR_rhel_ami_id: ${{ vars.RHEL_AMI_ID }}
   # 未設定なら空文字になり、SNSのメール購読は作られない
   TF_VAR_notification_email: ${{ vars.PATCH_NOTIFICATION_EMAIL }}
 

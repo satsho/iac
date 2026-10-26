@@ -1,0 +1,116 @@
+---
+# パッチ管理検証用VMの定義。site.yml / destroy.yml の両方から読む。
+
+aws_region: ap-northeast-1
+timezone: Asia/Tokyo
+
+# Terraform(terraform/environments/patch-mgmt)の output hybrid_node_role_name
+ssm_hybrid_role: iac-poc-patch-hybrid-node-role
+
+# ---------------------------------------------------------------------------
+# KVMホスト
+# ---------------------------------------------------------------------------
+
+# VMのディスク・cloud-initのseed ISOを置く場所
+libvirt_image_dir: /var/lib/libvirt/images/patch-mgmt
+# Red Hat Customer Portalからダウンロードした「Red Hat Enterprise Linux 10.2 KVM Guest Image」(qcow2)。
+# 各VMのルートディスクはこれをバッキングファイルにした差分ディスクになる。
+rhel_base_image: /var/lib/libvirt/images/rhel-10.2-x86_64-kvm.qcow2
+# virt-install --os-variant に渡す値(osinfo-query os | grep rhel10 で確認)
+os_variant: rhel10.0
+# VMのデフォルトユーザー(cloud-user)に登録するSSH公開鍵
+ssh_authorized_keys: []
+
+# ---------------------------------------------------------------------------
+# ネットワーク
+# ---------------------------------------------------------------------------
+# patch-mgmt     : NAT。repository / infra がRed Hat CDNとAWS(SSM)に出るためのネットワーク
+# patch-workload : 隔離(外部へのルーティング無し)。test / stg / prod と infra の2枚目のNIC
+#                  業務VMはinfraのミラー(http)とプロキシ(SSM・RHSMの宛先だけ許可)しか使えない
+
+libvirt_networks:
+  - name: patch-mgmt
+    bridge: virbr-patchm
+    forward: nat
+    address: 192.168.150.1
+    prefix: 24
+  - name: patch-workload
+    bridge: virbr-patchw
+    forward: none
+    address: 192.168.151.1
+    prefix: 24
+
+# 下の vms の nics と同じ値にしておく(user-dataのrsync先・repoファイル・プロキシ設定に使う)
+repository_ip: 192.168.150.10
+infra_mgmt_ip: 192.168.150.11
+infra_workload_ip: 192.168.151.11
+workload_cidr: 192.168.151.0/24
+proxy_port: 3128
+
+# ---------------------------------------------------------------------------
+# リポジトリ同期
+# ---------------------------------------------------------------------------
+
+# subscription-manager release --set に渡すマイナーリリース。空ならリリース固定を解除する
+rhel_release: "10.2"
+# ミラー上のディレクトリ: /var/www/html/repos/rhel/<release_dir>/<upstream_reposのキー>/
+release_dir: "{{ rhel_release if rhel_release | length > 0 else 'latest' }}"
+# repositoryがreposyncするRed Hat CDNのリポジトリ。キーはミラー上のディレクトリ名
+# EUSが使えないサブスクリプションの場合は rhel-10-for-x86_64-baseos-rpms 等に切り替える
+upstream_repos:
+  baseos: rhel-10-for-x86_64-baseos-eus-rpms
+  appstream: rhel-10-for-x86_64-appstream-eus-rpms
+# systemdのOnCalendar形式(timezone基準)
+reposync_schedule: "*-*-* 00:00:00"
+mirror_sync_schedule: "*-*-* 01:00:00"
+
+# ---------------------------------------------------------------------------
+# VM
+# ---------------------------------------------------------------------------
+# tags は SSM のマネージドノードに付くタグ(Name はVM名が自動で付く)。
+# PatchGroup は Terraform の patch_baselines のキー(rhel10-<キー>)と一致させること。
+# data_size_gb があるVMには、VMを作り直しても消えないミラー用データディスクを付ける。
+
+vms:
+  - name: patch-repository
+    role: repository
+    memory_mb: 2048
+    vcpus: 2
+    data_size_gb: 100
+    nics:
+      - { network: patch-mgmt, mac: "52:54:00:15:00:10", address: 192.168.150.10, gateway: true }
+    tags: { Role: repository, Env: mgmt, App: repo-mirror, PatchGroup: rhel10-mgmt, RebootPolicy: manual }
+
+  - name: patch-infra
+    role: infra
+    memory_mb: 2048
+    vcpus: 2
+    data_size_gb: 100
+    nics:
+      - { network: patch-mgmt, mac: "52:54:00:15:00:11", address: 192.168.150.11, gateway: true }
+      - { network: patch-workload, mac: "52:54:00:15:01:11", address: 192.168.151.11, gateway: false }
+    tags: { Role: infra, Env: mgmt, App: repo-mirror, PatchGroup: rhel10-mgmt, RebootPolicy: manual }
+
+  - name: patch-test
+    role: workload
+    memory_mb: 2048
+    vcpus: 1
+    nics:
+      - { network: patch-workload, mac: "52:54:00:15:01:21", address: 192.168.151.21, gateway: false }
+    tags: { Role: workload, Env: test, App: sample-app, PatchGroup: rhel10-test, RebootPolicy: auto }
+
+  - name: patch-stg
+    role: workload
+    memory_mb: 2048
+    vcpus: 1
+    nics:
+      - { network: patch-workload, mac: "52:54:00:15:01:22", address: 192.168.151.22, gateway: false }
+    tags: { Role: workload, Env: stg, App: sample-app, PatchGroup: rhel10-stg, RebootPolicy: auto }
+
+  - name: patch-prod
+    role: workload
+    memory_mb: 2048
+    vcpus: 1
+    nics:
+      - { network: patch-workload, mac: "52:54:00:15:01:23", address: 192.168.151.23, gateway: false }
+    tags: { Role: workload, Env: prod, App: sample-app, PatchGroup: rhel10-prod, RebootPolicy: manual }

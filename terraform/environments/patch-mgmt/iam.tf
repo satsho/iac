@@ -1,33 +1,45 @@
 data "aws_caller_identity" "current" {}
 
+locals {
+  name = "${var.project_name}-patch"
+}
+
 # ---------------------------------------------------------------------------
-# EC2インスタンス用(SSM Agent)
+# KVM上のVM用(SSM Hybrid Activation)
 # ---------------------------------------------------------------------------
 
-resource "aws_iam_role" "instance" {
-  name = "${local.name}-instance-role"
+# Hybrid Activationで登録したVM(mi-で始まるマネージドノード)が引き受けるロール。
+# 家のサーバ本体用の既存ロール(environments/dnsのssm-hybrid-activation、Route53等の
+# 権限付き)とは分けて、パッチ検証のVMにはSSMとログ出力の権限だけを持たせる。
+# アクティベーション自体はVMを作るたびにAnsible(ansible/patch-mgmt)が作成する。
+resource "aws_iam_role" "hybrid_node" {
+  name = "${local.name}-hybrid-node-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
       Effect    = "Allow"
-      Principal = { Service = "ec2.amazonaws.com" }
+      Principal = { Service = "ssm.amazonaws.com" }
       Action    = "sts:AssumeRole"
+      Condition = {
+        StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.current.account_id }
+        ArnEquals    = { "aws:SourceArn" = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:*" }
+      }
     }]
   })
 }
 
-# Fleet Manager / Run Command / Session Manager / Patch Manager に必要な最小セット
-resource "aws_iam_role_policy_attachment" "instance_ssm" {
-  role       = aws_iam_role.instance.name
+# Fleet Manager / Run Command / Patch Manager に必要な最小セット
+resource "aws_iam_role_policy_attachment" "hybrid_node_ssm" {
+  role       = aws_iam_role.hybrid_node.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-# Run Commandの出力をCloudWatch Logsへ書き込むのはインスタンス上のSSM Agentなので、
-# インスタンスロール側にロググループへの書き込み権限が要る。
-resource "aws_iam_role_policy" "instance_command_logs" {
+# Run Commandの出力をCloudWatch Logsへ書き込むのはVM上のSSM Agentなので、
+# ノード側のロールにロググループへの書き込み権限が要る。
+resource "aws_iam_role_policy" "hybrid_node_command_logs" {
   name = "run-command-output-logs"
-  role = aws_iam_role.instance.id
+  role = aws_iam_role.hybrid_node.id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -46,11 +58,6 @@ resource "aws_iam_role_policy" "instance_command_logs" {
       },
     ]
   })
-}
-
-resource "aws_iam_instance_profile" "instance" {
-  name = "${local.name}-instance-profile"
-  role = aws_iam_role.instance.name
 }
 
 # ---------------------------------------------------------------------------
@@ -90,7 +97,7 @@ resource "aws_iam_role_policy" "patch_automation" {
         Resource = [
           "arn:aws:ssm:${var.aws_region}::document/AWS-RunPatchBaseline",
           "arn:aws:ssm:${var.aws_region}::document/AWS-RunShellScript",
-          "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:instance/*",
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:managed-instance/*",
         ]
       },
       {
@@ -107,7 +114,6 @@ resource "aws_iam_role_policy" "patch_automation" {
           "ssm:DescribeInstancePatchStatesForPatchGroup",
           "ssm:DescribeMaintenanceWindowExecutions",
           "ssm:GetAutomationExecution",
-          "ec2:DescribeInstances",
         ]
         Resource = "*"
       },

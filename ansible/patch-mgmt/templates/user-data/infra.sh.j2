@@ -1,0 +1,92 @@
+# ---- infra: repositoryからrsyncで同期するミラー。業務VMにはhttpで配る ----
+# あわせて、外に出られない業務VMのためにプロキシ(SSM・RHSMの宛先だけ)とNTPサーバも兼ねる。
+dnf install -y httpd rsync squid
+
+mkdir -p /var/www/html/repos/rhel
+
+cat <<'EOF' > /usr/local/sbin/patch-mirror-sync.sh
+#!/bin/bash
+set -euo pipefail
+src="rsync://{{ repository_ip }}/rhel/"
+dst=/var/www/html/repos/rhel/
+
+# repository側がreposync中なら、途中の状態をコピーしないよう今回は見送る
+if rsync --list-only "$src.sync-in-progress" >/dev/null 2>&1; then
+  echo "repository is running reposync, skipping this run"
+  exit 0
+fi
+
+# 1回目: パッケージ本体だけを先に追加する。メタデータは古いまま(=古いパッケージを指したまま)
+#        なので、同期中に業務VMがdnfを実行しても「メタデータにあるのにパッケージが無い」
+#        状態にはならない。
+rsync -rlt --exclude='repodata/' --exclude='.last-sync' --exclude='.sync-in-progress' "$src" "$dst"
+# 2回目: メタデータを差し替え、上流で消えたパッケージを削除する
+rsync -rlt --delete --delay-updates --exclude='.sync-in-progress' "$src" "$dst"
+restorecon -R "$dst"
+EOF
+chmod 755 /usr/local/sbin/patch-mirror-sync.sh
+
+cat <<'EOF' > /etc/systemd/system/patch-mirror-sync.service
+[Unit]
+Description=Sync the local mirror from the repository server
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/patch-mirror-sync.sh
+TimeoutStartSec=6h
+EOF
+
+cat <<'EOF' > /etc/systemd/system/patch-mirror-sync.timer
+[Unit]
+Description=Daily rsync from the repository server
+
+[Timer]
+OnCalendar={{ mirror_sync_schedule }}
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+# ---- 業務VM向けのフォワードプロキシ ----
+# 業務VMが外に出られるのはここだけ。通すのはSSM(Fleet Manager/Run Command/Patch Manager)・
+# CloudWatch Logs・S3(SSM Agent本体とパッチ処理用ファイル)・RHSMの登録だけで、
+# Red Hat CDN(cdn.redhat.com)などは拒否する。拒否した通信は access.log に残る。
+cat <<'EOF' > /etc/squid/squid.conf
+http_port {{ proxy_port }}
+
+acl workload_net src {{ workload_cidr }}
+acl SSL_ports port 443
+acl CONNECT method CONNECT
+acl allowed_hosts dstdomain ssm.{{ aws_region }}.amazonaws.com
+acl allowed_hosts dstdomain ssmmessages.{{ aws_region }}.amazonaws.com
+acl allowed_hosts dstdomain ec2messages.{{ aws_region }}.amazonaws.com
+acl allowed_hosts dstdomain logs.{{ aws_region }}.amazonaws.com
+acl allowed_hosts dstdomain .s3.{{ aws_region }}.amazonaws.com
+acl allowed_hosts dstdomain subscription.rhsm.redhat.com
+
+http_access deny CONNECT !SSL_ports
+http_access allow workload_net allowed_hosts
+http_access deny all
+
+cache deny all
+access_log daemon:/var/log/squid/access.log squid
+coredump_dir /var/spool/squid
+EOF
+
+# ---- 業務VM向けのNTP ----
+# 業務VMは外のNTPに出られないので、infraの時刻に合わせさせる
+# (時刻がずれるとAWS APIの署名が通らずSSMが使えなくなる)
+echo "allow {{ workload_cidr }}" >> /etc/chrony.conf
+systemctl restart chronyd
+
+if systemctl is-active --quiet firewalld; then
+  firewall-cmd --permanent --add-service=http --add-service=squid --add-service=ntp
+  firewall-cmd --reload
+fi
+
+# 初回のミラー同期はrepositoryのreposyncが終わってから手動で行う(README参照)
+systemctl daemon-reload
+systemctl enable --now httpd squid patch-mirror-sync.timer

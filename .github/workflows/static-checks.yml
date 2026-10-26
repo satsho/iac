@@ -96,7 +96,7 @@ jobs:
 
       - name: Ansible Lint
         working-directory: ansible
-        run: ansible-lint playbook.yml
+        run: ansible-lint playbook.yml patch-mgmt/site.yml patch-mgmt/destroy.yml
 
   packer-lint:
     runs-on: ubuntu-latest

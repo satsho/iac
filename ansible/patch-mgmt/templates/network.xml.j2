@@ -1,0 +1,10 @@
+<!-- {{ ansible_managed | default('Managed by ansible/patch-mgmt') }} -->
+<network>
+  <name>{{ net.name }}</name>
+{% if net.forward == 'nat' %}
+  <forward mode='nat'/>
+{% endif %}
+  <bridge name='{{ net.bridge }}' stp='on' delay='0'/>
+  <!-- VMのIPはcloud-initのnetwork-configで固定するのでDHCPは使わない -->
+  <ip address='{{ net.address }}' prefix='{{ net.prefix }}'/>
+</network>

@@ -1,0 +1,33 @@
+---
+- name: Check whether the libvirt network exists - {{ net.name }}
+  ansible.builtin.command: "virsh net-info {{ net.name }}"
+  register: net_info
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Define the libvirt network - {{ net.name }}
+  when: net_info.rc != 0
+  become: true
+  block:
+    - name: Render the network definition - {{ net.name }}
+      ansible.builtin.template:
+        src: network.xml.j2
+        dest: "{{ libvirt_image_dir }}/{{ net.name }}.xml"
+        mode: "0644"
+
+    - name: Register the network with libvirt - {{ net.name }}
+      ansible.builtin.command: "virsh net-define {{ libvirt_image_dir }}/{{ net.name }}.xml"
+      changed_when: true
+
+- name: Start the libvirt network on boot - {{ net.name }}
+  ansible.builtin.command: "virsh net-autostart {{ net.name }}"
+  changed_when: false
+  become: true
+
+- name: Start the libvirt network - {{ net.name }}
+  ansible.builtin.command: "virsh net-start {{ net.name }}"
+  register: net_start
+  changed_when: net_start.rc == 0
+  failed_when: net_start.rc != 0 and 'already active' not in net_start.stderr
+  become: true

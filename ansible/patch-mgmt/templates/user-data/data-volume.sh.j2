@@ -1,0 +1,13 @@
+# ---- ミラー用データディスクのマウント ----
+# データディスクはVMとは別のqcow2なので、VMを作り直してもreposync済みのデータが残る。
+# virt-installで付けたシリアル番号(mirror-data)からデバイスを特定する。
+data_dev=/dev/disk/by-id/virtio-mirror-data
+if ! blkid "$data_dev" >/dev/null 2>&1; then
+  mkfs.xfs "$data_dev"
+fi
+mkdir -p /var/www/html/repos
+data_uuid=$(blkid -s UUID -o value "$data_dev")
+grep -q "$data_uuid" /etc/fstab || echo "UUID=$data_uuid /var/www/html/repos xfs defaults,nofail 0 2" >> /etc/fstab
+systemctl daemon-reload
+mountpoint -q /var/www/html/repos || mount /var/www/html/repos
+restorecon -R /var/www/html/repos

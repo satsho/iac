@@ -11,133 +11,9 @@ variable "project_name" {
 }
 
 variable "timezone" {
-  description = "インスタンスのOSタイムゾーン、およびメンテナンスウィンドウ・systemd timerのスケジュールを解釈するタイムゾーン"
+  description = "メンテナンスウィンドウのスケジュールを解釈するタイムゾーン(VM側のタイムゾーンはansible/patch-mgmt/vars.ymlで設定)"
   type        = string
   default     = "Asia/Tokyo"
-}
-
-# ---------------------------------------------------------------------------
-# ネットワーク
-# ---------------------------------------------------------------------------
-
-variable "vpc_cidr" {
-  description = "VPC全体のCIDR"
-  type        = string
-  default     = "10.20.0.0/16"
-}
-
-variable "availability_zone" {
-  description = "サブネットを作るAZ(検証用なので1AZ構成)"
-  type        = string
-  default     = "ap-northeast-1a"
-}
-
-variable "public_subnet_cidr" {
-  description = "NAT Gateway専用のパブリックサブネット。EC2は置かない"
-  type        = string
-  default     = "10.20.0.0/24"
-}
-
-variable "private_subnet_cidr" {
-  description = "5台のEC2(repository/infra/test/stg/prod)を置くプライベートサブネット"
-  type        = string
-  default     = "10.20.1.0/24"
-}
-
-variable "restrict_workload_egress" {
-  description = <<-EOT
-    true の場合、業務サーバ(test/stg/prod)のアウトバウンドを「infraのミラー(80/tcp)」と
-    「VPCエンドポイント(SSM・CloudWatch Logs・S3)」だけに絞る。RHEL 10.1以降のPAYG AMIは
-    auto-registration v2 で Red Hat CDN に直接つながるため、ミラーを迂回させないためのガード。
-    インターフェイスエンドポイント4つ分の時間課金がかかるので、コストを優先するなら false。
-  EOT
-  type        = bool
-  default     = true
-}
-
-# ---------------------------------------------------------------------------
-# EC2
-# ---------------------------------------------------------------------------
-
-variable "rhel_ami_id" {
-  description = <<-EOT
-    RHEL 10.2 のPAYG AMI ID(Red Hat公式、AWS Marketplace / Quick Start)。
-    10.1以降のAMIであること(auto-registration v2 でRed Hat CDNを使う前提のため)。
-    また業務サーバのミラーはEUS 10.2なので、10.3以降のAMIを使うとダウングレード扱いになり更新できない。
-    GitHub VariablesのRHEL_AMI_IDからTF_VAR_rhel_ami_idとして渡す想定。
-  EOT
-  type        = string
-}
-
-variable "instance_type" {
-  description = "全サーバ共通のインスタンスタイプ。RHEL 10はx86-64-v3が必須なのでt2より新しい世代を使う"
-  type        = string
-  default     = "t3.small"
-}
-
-variable "mirror_volume_size" {
-  description = "repository/infraのミラー用データボリュームのサイズ(GB)。インスタンスとは別リソースなので、作り直してもreposync済みのデータが残る"
-  type        = number
-  default     = 100
-}
-
-variable "workloads" {
-  description = <<-EOT
-    業務サーバの定義。キーがインスタンス名になる。
-    env           : パッチグループ(rhel10-<env>)とメンテナンスウィンドウのターゲット(Envタグ)に使う
-    app           : アプリ単位でメンテナンスウィンドウを分けるためのAppタグ
-    reboot_policy : auto(パッチ適用後に自動再起動) / manual(再起動は人が行う)。RebootPolicyタグになる
-  EOT
-  type = map(object({
-    env           = string
-    app           = string
-    reboot_policy = string
-  }))
-  default = {
-    test = { env = "test", app = "sample-app", reboot_policy = "auto" }
-    stg  = { env = "stg", app = "sample-app", reboot_policy = "auto" }
-    prod = { env = "prod", app = "sample-app", reboot_policy = "manual" }
-  }
-
-  validation {
-    condition     = alltrue([for w in values(var.workloads) : contains(["auto", "manual"], w.reboot_policy)])
-    error_message = "reboot_policy は auto か manual を指定してください。"
-  }
-}
-
-# ---------------------------------------------------------------------------
-# リポジトリ同期
-# ---------------------------------------------------------------------------
-
-variable "rhel_release" {
-  description = "repository/infraで subscription-manager release --set に渡すマイナーリリース。EUSリポジトリの$releaseverになる。空文字ならリリース固定を解除する"
-  type        = string
-  default     = "10.2"
-}
-
-variable "upstream_repos" {
-  description = <<-EOT
-    repositoryがreposyncするRed Hat CDNのリポジトリ。
-    キーはミラー上のディレクトリ名(業務サーバのrepoファイルのURLにも使う)、値はCDNのリポジトリID。
-    EUSが使えない契約の場合は rhel-10-for-x86_64-baseos-rpms のような非EUSのIDに切り替える。
-  EOT
-  type        = map(string)
-  default = {
-    baseos    = "rhel-10-for-x86_64-baseos-eus-rpms"
-    appstream = "rhel-10-for-x86_64-appstream-eus-rpms"
-  }
-}
-
-variable "reposync_schedule" {
-  description = "repositoryがCDNからreposyncする時刻(systemdのOnCalendar形式、timezone基準)"
-  type        = string
-  default     = "*-*-* 00:00:00"
-}
-
-variable "mirror_sync_schedule" {
-  description = "infraがrepositoryからrsyncする時刻(systemdのOnCalendar形式、timezone基準)。reposyncが終わっている時刻にする"
-  type        = string
-  default     = "*-*-* 01:00:00"
 }
 
 # ---------------------------------------------------------------------------
@@ -147,6 +23,7 @@ variable "mirror_sync_schedule" {
 variable "patch_baselines" {
   description = <<-EOT
     環境ごとのパッチベースライン。キーがパッチグループ名(rhel10-<キー>)になる。
+    VMのPatchGroupタグ(ansible/patch-mgmt/vars.yml)と一致させること。
     承認方式はどちらか一方を指定する:
       approve_after_days : アドバイザリの日付から N 日経ったパッチを自動承認(0〜360)
       approve_until_date : この日付(YYYY-MM-DD)以前のパッチだけを承認(「testで検証した日付」まで、のように使う)

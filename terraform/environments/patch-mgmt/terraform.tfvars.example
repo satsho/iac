@@ -1,19 +1,12 @@
 # このファイルをコピーして terraform.tfvars として使う(値はすべて非機密)。
-# rhel_ami_id は GitHub Variables の RHEL_AMI_ID から TF_VAR_rhel_ami_id として渡している。
 
 notification_email = "you@example.com"
 
 # 緊急パッチRunbookの承認者のデフォルト
 emergency_approvers = ["arn:aws:iam::123456789012:role/your-admin-role"]
 
-# --- 例: アプリ単位でサーバを増やし、メンテナンスウィンドウを分ける -----------------
-# workloads = {
-#   test       = { env = "test", app = "sample-app", reboot_policy = "auto" }
-#   stg        = { env = "stg", app = "sample-app", reboot_policy = "auto" }
-#   prod       = { env = "prod", app = "sample-app", reboot_policy = "manual" }
-#   prod-app-b = { env = "prod", app = "app-b", reboot_policy = "auto" }
-# }
-#
+# --- 例: アプリ単位でメンテナンスウィンドウを分ける -------------------------------
+# VM側(ansible/patch-mgmt/vars.yml)に App=app-b のVMを足したうえで、ウィンドウを追加する。
 # maintenance_windows = {
 #   (デフォルトの test-weekly / stg-weekly / prod-weekly をコピーしたうえで追加する)
 #   prod-app-b-sunday = {

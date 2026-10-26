@@ -1,0 +1,13 @@
+#!/bin/bash
+# cloud-initが初回起動時に1度だけ実行する({{ vm.name }} / role={{ vm.role }})
+set -euxo pipefail
+
+{% include 'user-data/common.sh.j2' %}
+
+{% if vm.role in ['repository', 'infra'] %}
+{% include 'user-data/data-volume.sh.j2' %}
+
+{% include 'user-data/rhsm-mirror.sh.j2' %}
+
+{% endif %}
+{% include 'user-data/' ~ vm.role ~ '.sh.j2' %}

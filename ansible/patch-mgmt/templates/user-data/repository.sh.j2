@@ -15,17 +15,17 @@ mirror_root=/var/www/html/repos/rhel
 touch "$mirror_root/.sync-in-progress"
 trap 'rm -f "$mirror_root/.sync-in-progress"' EXIT
 
-%{ for name, repo_id in upstream_repos ~}
+{% for name, repo_id in upstream_repos.items() %}
 dnf reposync \
-  --repoid="${repo_id}" \
-  --download-path="$mirror_root/${release_dir}/${name}" \
+  --repoid="{{ repo_id }}" \
+  --download-path="$mirror_root/{{ release_dir }}/{{ name }}" \
   --norepopath \
   --download-metadata \
   --delete \
   --remote-time
-%{ endfor ~}
+{% endfor %}
 
-date --iso-8601=seconds > "$mirror_root/${release_dir}/.last-sync"
+date --iso-8601=seconds > "$mirror_root/{{ release_dir }}/.last-sync"
 restorecon -R "$mirror_root"
 EOF
 chmod 755 /usr/local/sbin/patch-reposync.sh
@@ -47,7 +47,7 @@ cat <<'EOF' > /etc/systemd/system/patch-reposync.timer
 Description=Daily reposync from Red Hat CDN
 
 [Timer]
-OnCalendar=${reposync_schedule}
+OnCalendar={{ reposync_schedule }}
 Persistent=true
 
 [Install]
@@ -66,7 +66,7 @@ log file = /var/log/rsyncd.log
 [rhel]
 path = /var/www/html/repos/rhel
 comment = Red Hat CDN mirror (reposync)
-hosts allow = ${infra_ip}
+hosts allow = {{ infra_mgmt_ip }}
 hosts deny = *
 EOF
 # httpd用ラベル(httpd_sys_content_t)のディレクトリをrsyncdに読ませるためのSELinux設定
@@ -79,5 +79,5 @@ fi
 
 systemctl daemon-reload
 systemctl enable --now httpd rsyncd patch-reposync.timer
-# 初回の同期は数時間かかるので、user_dataの完了を待たせずバックグラウンドで始める
+# 初回の同期は数時間かかるので、cloud-initの完了を待たせずバックグラウンドで始める
 systemctl start --no-block patch-reposync.service

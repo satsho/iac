@@ -1,22 +1,6 @@
-output "vpc_id" {
-  value = aws_vpc.this.id
-}
-
-output "instance_ids" {
-  description = "インスタンス名 => インスタンスID"
-  value = merge(
-    { for k, i in aws_instance.mirror : k => i.id },
-    { for k, i in aws_instance.workload : k => i.id },
-  )
-}
-
-output "repository_ip" {
-  value = local.repository_ip
-}
-
-output "infra_mirror_url" {
-  description = "業務サーバが参照するミラーのURL"
-  value       = "http://${local.infra_ip}/repos/rhel/${local.release_dir}/"
+output "hybrid_node_role_name" {
+  description = "VMのHybrid Activationに使うIAMロール名(ansible/patch-mgmt/vars.yml の ssm_hybrid_role に設定する)"
+  value       = aws_iam_role.hybrid_node.name
 }
 
 output "patch_baseline_ids" {

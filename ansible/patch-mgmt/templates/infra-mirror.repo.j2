@@ -1,0 +1,12 @@
+# {{ ansible_managed }}
+# 業務VMはinfraのミラーだけを使う。gpgcheckはRed Hatの署名鍵で行うので、
+# ミラーをhttpで配っても改ざんは検出できる。
+{% for name, repo_id in upstream_repos.items() %}
+[infra-{{ name }}]
+name=infra mirror of {{ repo_id }} ({{ release_dir }})
+baseurl=http://{{ infra_workload_ip }}/repos/rhel/{{ release_dir }}/{{ name }}/
+enabled=1
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
+
+{% endfor %}

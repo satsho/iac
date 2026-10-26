@@ -1,0 +1,56 @@
+---
+# repository / infra: RHSMへの登録を確認し、リリースをEUS 10.2に固定してミラー対象のリポジトリだけを有効にする
+- name: Wait for the automatic registration configured in the ISO
+  ansible.builtin.command: subscription-manager identity
+  register: rhsm_identity
+  until: rhsm_identity.rc == 0
+  retries: 20
+  delay: 30
+  changed_when: false
+  failed_when: false
+
+# ISOの自動登録が失敗していた場合だけ、環境変数のactivation keyで登録する
+- name: Register with Red Hat Subscription Management
+  when: rhsm_identity.rc != 0
+  block:
+    - name: Check that the Red Hat activation key is provided
+      ansible.builtin.assert:
+        that:
+          - rhel_org_id | length > 0
+          - rhel_activation_key | length > 0
+        fail_msg: "{{ vm.name }} がRHSMに登録されていません。環境変数 RHEL_ORG_ID / RHEL_ACTIVATION_KEY を設定して再実行してください"
+
+    - name: Register with the activation key
+      ansible.builtin.command:
+        argv: [subscription-manager, register, "--org={{ rhel_org_id }}", "--activationkey={{ rhel_activation_key }}"]
+      changed_when: true
+      no_log: true
+
+- name: Read the release setting
+  ansible.builtin.command: subscription-manager release --show
+  register: rhsm_release
+  changed_when: false
+
+# EUSリポジトリの $releasever になる。このサーバ自身のOS更新も業務VMと同じマイナーリリースに揃う
+- name: Pin the minor release
+  ansible.builtin.command: "subscription-manager release --set={{ rhel_release }}"
+  when: "rhel_release | length > 0 and rhsm_release.stdout != 'Release: ' ~ rhel_release"
+  changed_when: true
+
+- name: Unpin the minor release
+  ansible.builtin.command: subscription-manager release --unset
+  when: rhel_release | length == 0 and 'not set' not in rhsm_release.stdout
+  changed_when: true
+
+- name: Read the enabled repositories
+  ansible.builtin.command: subscription-manager repos --list-enabled
+  register: rhsm_repos
+  changed_when: false
+
+# サブスクリプションにEUSが含まれていない場合はここで失敗するので、
+# vars.yml の upstream_repos を非EUSのリポジトリIDに切り替える
+- name: Enable only the repositories that are mirrored
+  ansible.builtin.command:
+    argv: "{{ ['subscription-manager', 'repos', '--disable=*'] + (upstream_repos.values() | map('regex_replace', '^', '--enable=') | list) }}"
+  when: rhsm_repos.stdout | regex_findall('Repo ID:\s+(\S+)') | sort != upstream_repos.values() | list | sort
+  changed_when: true

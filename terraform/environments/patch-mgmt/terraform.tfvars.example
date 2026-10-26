@@ -1,0 +1,36 @@
+# このファイルをコピーして terraform.tfvars として使う(値はすべて非機密)。
+
+notification_email = "you@example.com"
+
+# 緊急パッチRunbookの承認者のデフォルト
+emergency_approvers = ["arn:aws:iam::123456789012:role/your-admin-role"]
+
+# --- 例: アプリ単位でメンテナンスウィンドウを分ける -------------------------------
+# VM側(ansible/patch-mgmt/vars.yml)に App=app-b のVMを足したうえで、ウィンドウを追加する。
+# maintenance_windows = {
+#   (デフォルトの test-weekly / stg-weekly / prod-weekly をコピーしたうえで追加する)
+#   prod-app-b-sunday = {
+#     description   = "prod app-b: 毎週日曜 03:00。app-bはアプリ側の都合で日曜に自動再起動"
+#     schedule      = "cron(0 3 ? * SUN *)"
+#     target_tags   = { Env = ["prod"], App = ["app-b"], RebootPolicy = ["auto"] }
+#     task_type     = "AUTOMATION"
+#     reboot_option = "RebootIfNeeded"
+#     gate          = { windows = ["stg-weekly"], patch_groups = ["rhel10-stg"], max_age_hours = 120 }
+#   }
+# }
+
+# --- 例: 「testで検証した日付」までのパッチだけをprodに流す ---------------------------
+# patch_baselines = {
+#   test = { approve_after_days = 0 }
+#   stg  = { approve_after_days = 1 }
+#   prod = { approve_until_date = "2026-10-20" }
+#   mgmt = { approve_after_days = 0 }
+# }
+
+# --- 例: 緊急パッチ(承認待ち日数を飛ばして特定のアドバイザリを承認する) -----------
+# patch_baselines = {
+#   test = { approve_after_days = 0, approved_patches = ["RHSA-2026:12345"] }
+#   stg  = { approve_after_days = 1, approved_patches = ["RHSA-2026:12345"] }
+#   prod = { approve_after_days = 2, approved_patches = ["RHSA-2026:12345"] }
+#   mgmt = { approve_after_days = 0 }
+# }

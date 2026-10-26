@@ -1,0 +1,33 @@
+---
+# KVMホスト: ISOからのインストールを開始する(loop_var: vm)。
+# インストーラはルートディスクだけを付けて起動する。Image BuilderのISOは「最初のディスク」を
+# 無条件にフォーマットするので、ミラー用データディスクはインストールが終わってから付ける
+# (kvm-finish.yml)。
+- name: Create the VM directory - {{ vm.name }}
+  ansible.builtin.file:
+    path: "{{ libvirt_image_dir }}/{{ vm.name }}"
+    state: directory
+    mode: "0700"
+
+- name: Create the root disk - {{ vm.name }}
+  ansible.builtin.command:
+    argv: [qemu-img, create, -f, qcow2, "{{ libvirt_image_dir }}/{{ vm.name }}/root.qcow2", "{{ root_disk_size_gb }}G"]
+    creates: "{{ libvirt_image_dir }}/{{ vm.name }}/root.qcow2"
+
+# --noautoconsole なので、インストールの完了を待たずに戻る。インストールが終わると
+# VMは停止した状態になるので、kvm-finish.yml で停止を待ってから起動し直す。
+- name: Start the unattended installation from the ISO - {{ vm.name }}
+  ansible.builtin.command:
+    cmd: >-
+      virt-install
+      --name {{ vm.name }}
+      --memory {{ vm.memory_mb }}
+      --vcpus {{ vm.vcpus }}
+      --cpu host-passthrough
+      --os-variant {{ os_variant }}
+      --cdrom {{ rhel_install_iso }}
+      --disk path={{ libvirt_image_dir }}/{{ vm.name }}/root.qcow2,bus=virtio
+      {% for nic in vm.nics %}--network network={{ nic.network }},mac={{ nic.mac }},model=virtio {% endfor %}
+      --graphics vnc,listen=127.0.0.1
+      --noautoconsole
+  changed_when: true

@@ -1,0 +1,34 @@
+---
+# 業務VM(test/stg/prod): 時刻とリポジトリをinfraに向ける。SSMより先に行う(時刻がずれていると登録できない)
+- name: Synchronize time with infra
+  ansible.builtin.template:
+    src: chrony-workload.conf.j2
+    dest: /etc/chrony.conf
+    mode: "0644"
+  notify: Restart chronyd
+
+- name: Find the existing repository files
+  ansible.builtin.find:
+    paths: /etc/yum.repos.d
+    patterns: "*.repo"
+    excludes: infra-mirror.repo
+  register: other_repo_files
+
+# パッケージはinfraのミラーだけから取る(ISOの自動登録で作られた redhat.repo なども無効にする)
+- name: Disable every repository except the infra mirror
+  ansible.builtin.replace:
+    path: "{{ item.path }}"
+    regexp: '^enabled\s*=\s*1'
+    replace: enabled=0
+  loop: "{{ other_repo_files.files }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Use the infra mirror
+  ansible.builtin.template:
+    src: infra-mirror.repo.j2
+    dest: /etc/yum.repos.d/infra-mirror.repo
+    mode: "0644"
+
+- name: Apply the time settings
+  ansible.builtin.meta: flush_handlers

@@ -1,0 +1,49 @@
+---
+# パッチ管理検証用のVMを消す(SSMのマネージドノード登録とRHSMの登録も解除する)。
+#   ansible-playbook -K ansible/patch-mgmt/destroy.yml
+#   ansible-playbook -K ansible/patch-mgmt/destroy.yml -e wipe_data=true -e remove_networks=true
+# 1台だけ消す場合: -e '{"only": ["patch-test"]}'
+- name: Remove the patch management lab from the KVM host
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - vars.yml
+
+  vars:
+    # true: ミラー用データディスクも消す(次に作るときはreposyncを最初からやり直す)
+    wipe_data: false
+    # true: libvirtのネットワークも消す
+    remove_networks: false
+    only: "{{ vms | map(attribute='name') | list }}"
+
+  tasks:
+    - name: Remove the VMs
+      ansible.builtin.include_tasks: destroy-vm.yml
+      loop: "{{ vms | selectattr('name', 'in', only) | list }}"
+      loop_control:
+        loop_var: vm
+        label: "{{ vm.name }}"
+
+    - name: Stop the libvirt networks
+      ansible.builtin.command: "virsh net-destroy {{ item.name }}"
+      loop: "{{ libvirt_networks }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: net_destroy
+      changed_when: net_destroy.rc == 0
+      failed_when: false
+      when: remove_networks | bool
+      become: true
+
+    - name: Remove the libvirt networks
+      ansible.builtin.command: "virsh net-undefine {{ item.name }}"
+      loop: "{{ libvirt_networks }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: net_undefine
+      changed_when: net_undefine.rc == 0
+      failed_when: false
+      when: remove_networks | bool
+      become: true

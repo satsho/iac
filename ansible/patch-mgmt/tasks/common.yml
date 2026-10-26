@@ -1,0 +1,44 @@
+---
+# 全VM共通: ホスト名・タイムゾーン・SSH
+- name: Set the hostname
+  ansible.builtin.hostname:
+    name: "{{ vm.name }}"
+
+- name: Read the current timezone
+  ansible.builtin.command: timedatectl show --property=Timezone --value
+  register: current_timezone
+  changed_when: false
+
+# メンテナンスウィンドウと同じタイムゾーンにしておくと、dnf・journalのログとパッチ適用の時刻を突き合わせやすい
+- name: Set the timezone to match the maintenance windows
+  ansible.builtin.command: "timedatectl set-timezone {{ timezone }}"
+  when: current_timezone.stdout != timezone
+  changed_when: true
+
+- name: Create the .ssh directory of the management user
+  ansible.builtin.file:
+    path: "/home/{{ vm_user }}/.ssh"
+    state: directory
+    owner: "{{ vm_user }}"
+    group: "{{ vm_user }}"
+    mode: "0700"
+
+- name: Register the SSH public key of the operator
+  ansible.builtin.lineinfile:
+    path: "/home/{{ vm_user }}/.ssh/authorized_keys"
+    line: "{{ lookup('ansible.builtin.file', ssh_public_key_file | expanduser) }}"
+    create: true
+    owner: "{{ vm_user }}"
+    group: "{{ vm_user }}"
+    mode: "0600"
+
+# 鍵を登録したので、ISOに入っている共通パスワードでのSSHログインは止める。
+# sshd_config.d は先に読んだ設定が優先されるので、既存の 50-*.conf より前の番号にする。
+- name: Configure password logins over SSH
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/10-patch-mgmt.conf
+    content: |
+      # Managed by ansible/patch-mgmt
+      PasswordAuthentication {{ 'yes' if ssh_password_authentication else 'no' }}
+    mode: "0600"
+  notify: Reload sshd

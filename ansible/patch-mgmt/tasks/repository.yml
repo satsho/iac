@@ -1,0 +1,70 @@
+---
+# repository: Red Hat CDNからreposyncし、httpd(確認用)とrsyncd(infra向け)で公開する
+- name: Install the packages for the repository server
+  ansible.builtin.dnf:
+    name: [httpd, rsync-daemon, dnf-plugins-core]
+    state: present
+
+- name: Install the reposync script
+  ansible.builtin.template:
+    src: patch-reposync.sh.j2
+    dest: /usr/local/sbin/patch-reposync.sh
+    mode: "0755"
+
+- name: Install the reposync service and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: "0644"
+  loop: [patch-reposync.service, patch-reposync.timer]
+  notify: Reload systemd
+
+- name: Configure the rsync daemon for the infra mirror
+  ansible.builtin.template:
+    src: rsyncd.conf.j2
+    dest: /etc/rsyncd.conf
+    mode: "0644"
+  notify: Restart rsyncd
+
+- name: Read whether rsyncd may export the httpd-labelled directory
+  ansible.builtin.command: getsebool rsync_export_all_ro
+  register: rsync_export_bool
+  changed_when: false
+
+# httpd用ラベル(httpd_sys_content_t)のディレクトリをrsyncdに読ませるためのSELinux設定
+- name: Allow rsyncd to export the mirror read-only
+  ansible.builtin.command: setsebool -P rsync_export_all_ro 1
+  when: "'--> on' not in rsync_export_bool.stdout"
+  changed_when: true
+
+- name: Allow http and rsync in firewalld
+  ansible.builtin.include_tasks: firewalld.yml
+  vars:
+    firewalld_services: [http, rsyncd]
+
+- name: Apply the systemd and service changes
+  ansible.builtin.meta: flush_handlers
+
+- name: Start the web server, rsync daemon and reposync timer
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop: [httpd, rsyncd, patch-reposync.timer]
+
+- name: Check whether the mirror has ever been synced
+  ansible.builtin.stat:
+    path: "/var/www/html/repos/rhel/{{ release_dir }}/.last-sync"
+  register: reposync_done
+
+- name: Check whether reposync is running
+  ansible.builtin.command: systemctl is-active patch-reposync.service
+  register: reposync_state
+  changed_when: false
+  failed_when: false
+
+# 初回の同期は数時間かかるので、playbookの完了を待たずにバックグラウンドで始める
+- name: Start the first reposync in the background
+  ansible.builtin.command: systemctl start --no-block patch-reposync.service
+  when: not reposync_done.stat.exists and reposync_state.stdout not in ['active', 'activating']
+  changed_when: true

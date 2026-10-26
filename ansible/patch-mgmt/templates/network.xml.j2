@@ -1,0 +1,19 @@
+<!-- {{ ansible_managed | default('Managed by ansible/patch-mgmt') }} -->
+<network>
+  <name>{{ net.name }}</name>
+{% if net.forward == 'nat' %}
+  <forward mode='nat'/>
+{% endif %}
+  <bridge name='{{ net.bridge }}' stp='on' delay='0'/>
+  <ip address='{{ net.address }}' netmask='{{ net.netmask }}'>
+    <dhcp>
+      <range start='{{ net.dhcp_range[0] }}' end='{{ net.dhcp_range[1] }}'/>
+      <!-- VMのIPはMACアドレスで固定する(ISOからのインストールなのでVM側では固定しない) -->
+{% for vm in vms %}
+{% for nic in vm.nics if nic.network == net.name %}
+      <host mac='{{ nic.mac }}' name='{{ vm.name }}' ip='{{ nic.address }}'/>
+{% endfor %}
+{% endfor %}
+    </dhcp>
+  </ip>
+</network>

@@ -1,0 +1,92 @@
+---
+# 作り直しを繰り返すと同じ名前のノードが複数残ることがあるので、Nameタグで全部拾う
+- name: Find the managed node IDs - {{ vm.name }}
+  ansible.builtin.command:
+    argv:
+      - aws
+      - ssm
+      - describe-instance-information
+      - --region
+      - "{{ aws_region }}"
+      - --filters
+      - "Key=tag:Name,Values={{ vm.name }}"
+      - --query
+      - "InstanceInformationList[].InstanceId"
+      - --output
+      - text
+  register: node_ids
+  changed_when: false
+
+# RHSMに登録したシステムが残り続けないよう、VMが動いているうちに登録を解除する(失敗しても続行)
+- name: Unregister from Red Hat Subscription Management - {{ vm.name }}
+  ansible.builtin.command:
+    argv: "{{ ['aws', 'ssm', 'send-command', '--region', aws_region, '--document-name', 'AWS-RunShellScript',
+              '--parameters', '{\"commands\": [\"subscription-manager unregister\"]}',
+              '--query', 'Command.CommandId', '--output', 'text', '--instance-ids'] + node_ids.stdout.split() }}"
+  register: unregister_command
+  changed_when: unregister_command.rc == 0
+  failed_when: false
+  when: node_ids.stdout | length > 0
+
+- name: Wait for the unregister command - {{ vm.name }}
+  ansible.builtin.command:
+    argv: [aws, ssm, wait, command-executed, --region, "{{ aws_region }}",
+           --command-id, "{{ unregister_command.stdout }}", --instance-id, "{{ node_ids.stdout.split() | first }}"]
+  changed_when: false
+  failed_when: false
+  when: unregister_command.rc | default(1) == 0
+
+- name: Check the VM state - {{ vm.name }}
+  ansible.builtin.command: "virsh domstate {{ vm.name }}"
+  register: domstate
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Stop the VM - {{ vm.name }}
+  ansible.builtin.command: "virsh destroy {{ vm.name }}"
+  changed_when: true
+  when: domstate.rc == 0 and 'shut off' not in domstate.stdout
+  become: true
+
+# UEFIで作られたVMはNVRAMも消さないとundefineできないので、まず --nvram 付きで試す
+- name: Remove the VM definition - {{ vm.name }}
+  ansible.builtin.command: "virsh undefine --nvram {{ vm.name }}"
+  register: undefine_nvram
+  changed_when: undefine_nvram.rc == 0
+  failed_when: false
+  when: domstate.rc == 0
+  become: true
+
+- name: Remove the VM definition without NVRAM - {{ vm.name }}
+  ansible.builtin.command: "virsh undefine {{ vm.name }}"
+  changed_when: true
+  when: domstate.rc == 0 and undefine_nvram.rc != 0
+  become: true
+
+- name: Remove the root disk - {{ vm.name }}
+  ansible.builtin.file:
+    path: "{{ libvirt_image_dir }}/{{ vm.name }}"
+    state: absent
+  become: true
+
+- name: Remove the mirror data disk - {{ vm.name }}
+  ansible.builtin.file:
+    path: "{{ libvirt_image_dir }}/{{ vm.name }}-data.qcow2"
+    state: absent
+  when: wipe_data | bool
+  become: true
+
+- name: Deregister the managed nodes from Systems Manager - {{ vm.name }}
+  ansible.builtin.command:
+    argv: [aws, ssm, deregister-managed-instance, --region, "{{ aws_region }}", --instance-id, "{{ item }}"]
+  loop: "{{ node_ids.stdout.split() }}"
+  changed_when: true
+
+# 作り直すとホスト鍵が変わるので、このVM用のknown_hostsから古い鍵を消しておく
+- name: Forget the SSH host key - {{ vm.name }}
+  ansible.builtin.command:
+    argv: [ssh-keygen, -R, "{{ (vm.nics | first).address }}", -f, "{{ ssh_known_hosts_file | expanduser }}"]
+  register: forget_host_key
+  changed_when: "'updated' in forget_host_key.stdout"
+  failed_when: false

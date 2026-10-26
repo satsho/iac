@@ -1,0 +1,115 @@
+schemaVersion: '0.3'
+description: |-
+  前段ステージのパッチ適用が成功していることを確認してから、対象インスタンスに
+  AWS-RunPatchBaseline(Install)を実行する。メンテナンスウィンドウのAUTOMATIONタスクから
+  ターゲットのインスタンスごとに起動される想定。
+
+  ゲート条件(GateWindowIdsが空なら確認しない):
+    1. 前段のメンテナンスウィンドウが、直近 GateMaxAgeHours 時間以内に SUCCESS で終わっている
+    2. 前段のパッチグループのインスタンスに、適用失敗(Failed)と再起動待ち(InstalledPendingReboot)が残っていない
+assumeRole: '{{ AutomationAssumeRole }}'
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: このRunbookが引き受けるIAMロールのARN
+    default: ${automation_role_arn}
+  InstanceId:
+    type: String
+    description: パッチを適用するインスタンスID(メンテナンスウィンドウからは {{RESOURCE_ID}} が渡る)
+  RebootOption:
+    type: String
+    description: RebootIfNeeded(必要なら自動再起動) / NoReboot(再起動は手動で行う)
+    default: RebootIfNeeded
+    allowedValues:
+      - RebootIfNeeded
+      - NoReboot
+  GateWindowIds:
+    type: String
+    description: 前段ステージのメンテナンスウィンドウID(カンマ区切り)。空ならゲートチェックをしない
+    default: ''
+  GatePatchGroups:
+    type: String
+    description: 前段ステージのパッチグループ名(カンマ区切り)
+    default: ''
+  GateMaxAgeHours:
+    type: Integer
+    description: 前段のメンテナンスウィンドウの実行を何時間前まで有効とみなすか
+    default: 72
+  LogGroupName:
+    type: String
+    description: Run Commandの出力先ロググループ
+    default: ${log_group_name}
+mainSteps:
+  - name: CheckPreviousStage
+    action: aws:executeScript
+    timeoutSeconds: 120
+    onFailure: Abort
+    inputs:
+      Runtime: python3.11
+      Handler: handler
+      InputPayload:
+        WindowIds: '{{ GateWindowIds }}'
+        PatchGroups: '{{ GatePatchGroups }}'
+        MaxAgeHours: '{{ GateMaxAgeHours }}'
+      Script: |-
+        import datetime
+
+        import boto3
+
+
+        def handler(events, context):
+            ssm = boto3.client("ssm")
+            window_ids = [w for w in events["WindowIds"].split(",") if w]
+            patch_groups = [g for g in events["PatchGroups"].split(",") if g]
+            max_age_hours = int(events["MaxAgeHours"])
+            since = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=max_age_hours)
+            problems = []
+
+            # 1. 前段のメンテナンスウィンドウが直近で成功しているか
+            for window_id in window_ids:
+                executions = ssm.describe_maintenance_window_executions(
+                    WindowId=window_id,
+                    Filters=[{"Key": "ExecutedAfter", "Values": [since.strftime("%Y-%m-%dT%H:%M:%SZ")]}],
+                )["WindowExecutions"]
+                if not executions:
+                    problems.append(f"{window_id}: 直近{max_age_hours}時間以内に実行されていない")
+                    continue
+                latest = max(executions, key=lambda e: e["StartTime"])
+                if latest["Status"] != "SUCCESS":
+                    problems.append(f"{window_id}: 直近の実行 {latest['WindowExecutionId']} が {latest['Status']}")
+
+            # 2. 前段のインスタンスに失敗・再起動待ちが残っていないか(手動再起動パターンの完了確認も兼ねる)
+            paginator = ssm.get_paginator("describe_instance_patch_states_for_patch_group")
+            for group in patch_groups:
+                states = [s for page in paginator.paginate(PatchGroup=group) for s in page["InstancePatchStates"]]
+                if not states:
+                    problems.append(f"{group}: パッチ状態を報告しているインスタンスが無い")
+                for s in states:
+                    failed = s.get("FailedCount", 0)
+                    pending_reboot = s.get("InstalledPendingRebootCount", 0)
+                    if failed or pending_reboot:
+                        problems.append(f"{group}/{s['InstanceId']}: Failed={failed} PendingReboot={pending_reboot}")
+
+            if problems:
+                raise Exception("前段ステージが完了していないため中止します: " + " / ".join(problems))
+            return {"summary": f"gate passed (windows={window_ids}, patch_groups={patch_groups})"}
+    outputs:
+      - Name: Summary
+        Selector: $.Payload.summary
+        Type: String
+  - name: RunPatchBaseline
+    action: aws:runCommand
+    timeoutSeconds: 7200
+    onFailure: Abort
+    inputs:
+      DocumentName: AWS-RunPatchBaseline
+      InstanceIds:
+        - '{{ InstanceId }}'
+      Parameters:
+        Operation: Install
+        RebootOption: '{{ RebootOption }}'
+      CloudWatchOutputConfig:
+        CloudWatchOutputEnabled: true
+        CloudWatchLogGroupName: '{{ LogGroupName }}'
+outputs:
+  - CheckPreviousStage.Summary

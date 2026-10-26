@@ -14,8 +14,10 @@ iac/                          # リポジトリルート
 │   │   │   # state は1つ(環境ごとにまとめて作成・削除)だが、可読性のため
 │   │   │   # リソースドメインごとに.tfファイルを分割している:
 │   │   │   #   network.tf(networkモジュール呼び出し) / security_group.tf / iam.tf / ec2.tf / lb.tf
-│   │   └── dns/                # ドメイン(Route 53 hosted zone)専用の別state。
-│   │       # devとライフサイクルが違う(destroyされたくない)ので分離している
+│   │   ├── dns/                # ドメイン(Route 53 hosted zone)専用の別state。
+│   │   │   # devとライフサイクルが違う(destroyされたくない)ので分離している
+│   │   └── patch-mgmt/         # Patch Managerによるパッチ管理の検証(AWS側。VMは家のサーバのKVM)
+│   │       # 詳細は environments/patch-mgmt/README.md
 │   ├── modules/
 │   │   └── network/          # VPC・サブネット・ルーティング一式のモジュール(再利用可能な部品)
 │   ├── iam/                  # IAMロール定義(CFNテンプレート)
@@ -465,6 +467,21 @@ curl -i "$(terraform output -raw api_gateway_url)"
 curl -i "$(terraform output -raw api_gateway_url)" \
   -H "Authorization: Bearer <取得したトークン>"
 ```
+
+### Step 14: パッチ管理・リポジトリ更新の検証環境(environments/patch-mgmt)
+
+家のサーバの KVM 上に RHEL 10.2 の VM を5台(repository / infra / test / stg / prod)立て、
+Red Hat CDN → repository(reposync)→ infra(rsync)→ 業務VM(dnf)というリポジトリの流れと、
+Systems Manager Patch Managerによる段階的なパッチ適用(test → stg → prod)を検証する。
+VM は SSM Hybrid Activation で登録し、AWS 側(パッチベースライン・メンテナンスウィンドウ・
+Runbook・通知)だけをこの Terraform(別state `patch-mgmt/terraform.tfstate`、専用ワークフロー
+`.github/workflows/terraform-patch-mgmt.yml`)で管理する。VM 自体は家のサーバで
+`ansible/patch-mgmt/` の playbook を実行して作り、SSH で設定する。パッチの適用状況とCVEは
+CloudWatch ダッシュボード(`iac-poc-patch-status` / `iac-poc-patch-history`)で見る。
+
+設計(ネットワーク・プロキシ・タグ・パッチベースライン・メンテナンスウィンドウ・ゲート・
+再起動パターン・緊急パッチ)と構築手順は
+[`environments/patch-mgmt/README.md`](environments/patch-mgmt/README.md) にまとめている。
 
 ## CloudFormation Git Sync(`iac-terraform-role` スタックの自動反映)
 

@@ -1,0 +1,10 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Sync the local mirror from the repository server
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/patch-mirror-sync.sh
+TimeoutStartSec=6h

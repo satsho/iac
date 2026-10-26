@@ -3,8 +3,9 @@ Description: >
   IAM role that GitHub Actions (OIDC) assumes when running Terraform.
   The trust policy allows execution only from the specified Environment
   (a job that sets environment:). This is a trial/learning environment,
-  so the permission policy is intentionally broad for EC2, IAM and
-  CloudFormation; only the tfstate S3 bucket access stays scoped.
+  so the permission policy is intentionally broad for EC2, IAM, CloudFormation,
+  SSM and the other services Terraform manages; only the tfstate S3 bucket
+  access stays scoped.
 
 Parameters:
   RoleName:
@@ -138,6 +139,32 @@ Resources:
                 Effect: Allow
                 Action:
                   - s3:*
+                Resource: '*'
+              # パッチ管理検証(environments/patch-mgmt)用。Patch Manager・メンテナンス
+              # ウィンドウ・Runbook(SSM)、結果通知(EventBridge・SNS)、集計の定期実行
+              # (EventBridge Scheduler)、ロググループ・ダッシュボード・メトリクス
+              # (CloudWatch Logs / CloudWatch)をTerraformで作るため。
+              - Sid: SsmBroad
+                Effect: Allow
+                Action:
+                  - ssm:*
+                Resource: '*'
+              - Sid: EventBridgeBroad
+                Effect: Allow
+                Action:
+                  - events:*
+                  - scheduler:*
+                Resource: '*'
+              - Sid: SnsBroad
+                Effect: Allow
+                Action:
+                  - sns:*
+                Resource: '*'
+              - Sid: CloudWatchBroad
+                Effect: Allow
+                Action:
+                  - logs:*
+                  - cloudwatch:*
                 Resource: '*'
 
 Outputs:

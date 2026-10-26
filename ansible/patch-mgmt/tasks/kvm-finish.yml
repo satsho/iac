@@ -8,6 +8,18 @@
   delay: 20
   changed_when: false
 
+# ISOを付けたままにしておくと、ISOを移動・削除したときにVMが起動できなくなる
+# (ISOにはRed Hatのactivation keyも入っているので、使い終わったら外しておく)
+- name: List the disks of the VM - {{ vm.name }}
+  ansible.builtin.command: "virsh domblklist {{ vm.name }} --details"
+  register: vm_disks
+  changed_when: false
+
+- name: Eject the installer ISO - {{ vm.name }}
+  ansible.builtin.command: "virsh change-media {{ vm.name }} {{ item.split()[2] }} --eject --config"
+  loop: "{{ vm_disks.stdout_lines | select('search', rhel_install_iso | regex_escape ~ '$') | list }}"
+  changed_when: true
+
 - name: Create the mirror data disk - {{ vm.name }}
   ansible.builtin.command:
     argv: [qemu-img, create, -f, qcow2, "{{ libvirt_image_dir }}/{{ vm.name }}-data.qcow2", "{{ vm.data_size_gb }}G"]

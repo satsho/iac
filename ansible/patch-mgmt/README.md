@@ -55,6 +55,30 @@ SSH で設定する playbook。設計(ネットワーク・プロキシ・パッ
 
 先に Terraform 側を apply しておく(VM が引き受ける IAM ロール `iac-poc-patch-hybrid-node-role` が要る)。
 
+## ISOの置き場所
+
+家のサーバ(KVMホスト)の **`/var/lib/libvirt/images/rhel-10.2-patch-mgmt.iso`** に置く
+(`vars.yml` の `rhel_install_iso`)。
+
+VM を動かすプロセス(qemu)が読めて、SELinux のラベル(`virt_image_t`)も最初から合っている場所なので、
+ここに置くのが一番トラブルが少ない。ホームディレクトリなどに置くと、qemu から読めなかったり
+SELinux に拒否されたりして、インストールが始まらない。
+
+```bash
+# 手元のPCに Image Builder からダウンロードした場合
+scp ~/Downloads/<ダウンロードしたISO>.iso home:/tmp/
+ssh home
+sudo install -o root -g root -m 0644 /tmp/<ダウンロードしたISO>.iso /var/lib/libvirt/images/rhel-10.2-patch-mgmt.iso
+sudo restorecon -v /var/lib/libvirt/images/rhel-10.2-patch-mgmt.iso   # SELinuxが有効なホストの場合
+rm /tmp/<ダウンロードしたISO>.iso
+```
+
+- ファイル名を変えたくない場合は、`vars.yml` の `rhel_install_iso` を実際のパスに直す
+- ISO には自動登録用の org ID と activation key、ユーザーのパスワードが入っているので、
+  Git にコミットしたり共有フォルダに置いたりしない
+- インストールが終わると playbook が VM から ISO を外すので、作り終わったあとは ISO を移動・削除しても
+  VM は起動できる(VM を作り直すときにまた必要)
+
 ## 実行
 
 ```bash

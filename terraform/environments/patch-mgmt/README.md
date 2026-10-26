@@ -393,14 +393,16 @@ status ダッシュボードは「直近1時間」で見る前提にしている
 
 ## 構築手順
 
-1. **Terraform 実行ロールに権限を足す**: この環境は SSM・EventBridge(ルールと Scheduler)・SNS・
+1. **Terraform 実行ロールの権限を反映する**: この環境は SSM・EventBridge(ルールと Scheduler)・SNS・
    CloudWatch(Logs・ダッシュボード・メトリクス)を作るので、`terraform/iam/terraform-role.yaml` の
    `github-actions-terraform` ロールに `ssm:*` / `events:*` / `scheduler:*` / `sns:*` / `logs:*` /
-   `cloudwatch:*` が必要(今回の変更には含めていない)
+   `cloudwatch:*` を追加してある。`main` にマージすると `cfn-role-deploy.yml`(と CloudFormation の
+   Git sync)でロールに反映される。マージ前にこのブランチで試す場合は、ローカルから一度
+   `aws cloudformation deploy`(`terraform/README.md` の Step 2 と同じコマンド)で反映しておく
 2. GitHub Variables に `PATCH_NOTIFICATION_EMAIL`(通知先メールアドレス、任意)を設定する
 3. `Terraform Patch Management (patch-mgmt)` ワークフローを `plan` → `apply` で実行
 4. SNS から届く確認メールのリンクを踏む
-5. 家のサーバで VM を作る([`ansible/patch-mgmt/README.md`](../../../ansible/patch-mgmt/README.md))
+5. 家のサーバに ISO を置き、VM を作る([`ansible/patch-mgmt/README.md`](../../../ansible/patch-mgmt/README.md))
 6. Fleet Manager に5台(`mi-...`)が表示され、タグが付いていることを確認する
 7. repository の EUS リポジトリと reposync の進み具合を確認する(「前提 4.」「リポジトリ同期の流れ」)
 8. reposync が終わったら infra に同期させる(「リポジトリ同期の流れ」のコマンド)
@@ -442,12 +444,16 @@ SSM のマネージドノードと RHSM の登録も一緒に解除される。
 Systems Manager **Change Manager** は 2025/11/7 以降、新規の利用受付を終了しているため候補から外している。
 変更承認は「ベースライン変更は GitHub の PR」「緊急実行は Runbook の `aws:approve`」で代替している。
 
+## 決めたこと
+
+- 承認の考え方: 承認日数(日付基準、test 0日 / stg 1日 / prod 2日)+ 前段の成功確認(ゲート)で進める
+- ダッシュボード: まずは今の2つ(status / history)の簡易的なもので運用してみる
+- VM の管理: Session Manager は使わず SSH(外出先からは Tailscale 経由)
+
 ## これから詰める点
 
 - 使っているサブスクリプションに EUS が含まれるか → 含まれなければ非EUSで進めるか
-- 承認の考え方: 承認日数(日付基準)のままでよいか、ミラーの週1凍結や `approve_until_date` で「同じパッチを順番に流す」形にするか
 - 再起動パターンの割り当て: 今は test/stg が自動、prod が手動
 - アプリ単位のウィンドウのタグ設計: `App` タグで分けるか、`MaintenanceWindow=weekday-night` のようにウィンドウ名をタグに直接持たせるか
 - 緊急パッチの承認者と、Runbook を実行できる人(IAM)の範囲
 - 通知先: メールのままか、Slack(Amazon Q Developer in chat applications)に流すか
-- ダッシュボードで足りない観点(例: アプリ別、CVE ごとに影響VMを並べる)

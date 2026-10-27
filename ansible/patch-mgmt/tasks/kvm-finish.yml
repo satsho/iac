@@ -20,6 +20,35 @@
   loop: "{{ vm_disks.stdout_lines | select('search', rhel_install_iso | regex_escape ~ '$') | list }}"
   changed_when: true
 
+# libvirtのネットワークではDHCPを使わないので、初回起動の前にNetworkManagerの設定をディスクへ書き込んで
+# IPを固定する。インストーラが作ったDHCPの設定は消す(残すと、DHCPを待ってからでないと固定IPにならない)
+- name: Render the network settings of the VM - {{ vm.name }}
+  ansible.builtin.template:
+    src: nmconnection.j2
+    dest: "{{ libvirt_image_dir }}/{{ vm.name }}/{{ nic.network }}.nmconnection"
+    mode: "0600"
+  loop: "{{ vm.nics }}"
+  loop_control:
+    loop_var: nic
+    index_var: nic_index
+    label: "{{ nic.network }}"
+
+# LIBGUESTFS_BACKEND=direct: libvirtを通さずにqemuをrootで動かし、ディスクの権限に左右されないようにする。
+# SELinuxのラベルはvirt-customizeが付け直す
+- name: Write the network settings into the root disk - {{ vm.name }}
+  ansible.builtin.command:
+    cmd: >-
+      virt-customize --no-network
+      -a {{ libvirt_image_dir }}/{{ vm.name }}/root.qcow2
+      --run-command 'rm -f /etc/NetworkManager/system-connections/*.nmconnection'
+      {% for nic in vm.nics %}
+      --upload {{ libvirt_image_dir }}/{{ vm.name }}/{{ nic.network }}.nmconnection:/etc/NetworkManager/system-connections/
+      --chmod 0600:/etc/NetworkManager/system-connections/{{ nic.network }}.nmconnection
+      {% endfor %}
+  environment:
+    LIBGUESTFS_BACKEND: direct
+  changed_when: true
+
 - name: Create the mirror data disk - {{ vm.name }}
   ansible.builtin.command:
     argv: [qemu-img, create, -f, qcow2, "{{ libvirt_image_dir }}/{{ vm.name }}-data.qcow2", "{{ vm.data_size_gb }}G"]

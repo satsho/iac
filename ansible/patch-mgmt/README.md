@@ -19,9 +19,10 @@ SSH で設定する playbook。設計(ネットワーク・仮想FW・パッチ�
 
 1. **KVMホスト**(ローカル実行)
    - 業務VMのネットワーク向けの仮想FW(nftables。許可ドメインだけ外に出す)を用意する
-   - libvirtのネットワーク2つを作る(VMのIPはMACアドレスでDHCP固定)
+   - libvirtのネットワーク2つを作る(DHCPは使わない。家のサーバのDHCPサーバと共存できる)
    - まだ無いVMを、Image BuilderのISOから全台同時に無人インストールする
-   - インストールが終わって停止したVMから、ミラー用データディスクを付けて起動する
+   - インストールが終わって停止したVMから、初回起動の前に固定IPの設定をディスクへ書き込み
+     (`virt-customize`)、ミラー用データディスクを付けて起動する
      (ISOは最初のディスクを無条件にフォーマットするので、データディスクはインストール後に付ける)
 2. **repository / infra**(SSH)
    - SSH鍵の登録、パスワードでのSSHログインの停止、ホスト名・タイムゾーン
@@ -43,6 +44,7 @@ SSH で設定する playbook。設計(ネットワーク・仮想FW・パッチ�
 家のサーバ(KVMホスト)に必要なもの:
 
 - `libvirt` / `qemu-kvm` / `virt-install` / `qemu-img` / `aws`(AWS CLI v2)/ `ansible-core`
+- `guestfs-tools`(`virt-customize`。インストールしたVMのディスクに固定IPの設定を書き込む)
 - `sshpass`(初回だけ、VMにパスワードでSSHするため)
 - CPU が x86-64-v3 に対応していること(RHEL 10 の要件。AVX2 など。playbook で確認する)
 - メモリ: 4GB × 2(repository / infra)+ 2GB × 3 = 14GB
@@ -161,9 +163,9 @@ playbook を使わずに VM を消すと、RHSM のシステムと SSM の `mi-.
 
 | 症状 | 見るところ |
 |---|---|
-| ネットワークの起動で `dnsmasq: failed to bind DHCP server socket: Address already in use` | KVMホストの別のプロセスが DHCP のポート(UDP 67)を使っている。`ss -ulpn \| grep -E ':67\s'` で確認し、家の dnsmasq なら `bind-interfaces` と `interface=<LAN側のNIC>` で待ち受けを絞る(使っていなければ止める) |
+| ネットワークの起動で `dnsmasq: failed to bind DHCP server socket: Address already in use` | 古い定義(DHCPあり)のまま。`site.yml` を流し直すと DHCP なしの定義に置き換わる |
 | 「インストールが終わって停止するのを待つ」で止まる | VNC でインストーラの画面を見る。ISO のキックスタートに `reboot` / `poweroff` が無いと、最後に Enter 待ちで止まる |
-| SSH がつながらない | `virsh domifaddr <VM名>` / `virsh net-dhcp-leases patch-mgmt` でIPが払い出されているか |
+| SSH がつながらない | `virsh console <VM名>` で入り、`nmcli -f NAME,DEVICE connection show --active` と `ip -br addr` で `vars.yml` のIPが付いているか |
 | repository で EUS のリポジトリを有効にできない | サブスクリプションに EUS が無い可能性(Terraform 側 README の「前提 4.」) |
 | 業務VMの SSM 登録・RHSM 登録が失敗する | KVMホストで `journalctl -k \| grep 'patch-mgmt-fw drop:'`(必要な宛先を落としていないか)と `nft list set inet patch_mgmt_fw https_v4`(許可リストに IP が入っているか) |
 | 許可リストが空のまま増えない | dnsmasq が SELinux に止められていないか(`ausearch -m avc -ts recent -c dnsmasq`)。playbook は `dnsmasq_use_ipset` を有効にしている |

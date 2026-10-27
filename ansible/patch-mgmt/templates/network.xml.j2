@@ -9,17 +9,17 @@
   <forward mode='nat'/>
 {% endif %}
   <bridge name='{{ net.bridge }}' stp='on' delay='0'/>
-  <ip address='{{ net.address }}' netmask='{{ net.netmask }}'>
-    <dhcp>
-      <range start='{{ net.dhcp_range[0] }}' end='{{ net.dhcp_range[1] }}'/>
-      <!-- VMのIPはMACアドレスで固定する(ISOからのインストールなのでVM側では固定しない) -->
+  <!-- DHCPは使わない(VMのIPはディスクに書き込んで固定する。kvm-finish.yml)。dnsmasqは名前解決だけを行う -->
+  <dns>
 {% for vm in vms %}
 {% for nic in vm.nics if nic.network == net.name %}
-      <host mac='{{ nic.mac }}' name='{{ vm.name }}' ip='{{ nic.address }}'/>
+    <host ip='{{ nic.address }}'>
+      <hostname>{{ vm.name }}</hostname>
+    </host>
 {% endfor %}
 {% endfor %}
-    </dhcp>
-  </ip>
+  </dns>
+  <ip address='{{ net.address }}' prefix='{{ net.prefix }}'/>
 {% if net.egress_firewall | default(false) %}
   <!-- 仮想FW: 許可ドメインを名前解決した結果のIPを、KVMホストのnftablesの許可リスト(set)に入れる -->
   <dnsmasq:options>

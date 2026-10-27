@@ -19,41 +19,6 @@
   loop: [patch-mirror-sync.service, patch-mirror-sync.timer]
   notify: Reload systemd
 
-# 業務VM側のネットワークは仮想FWで外への通信が絞られているので、infraのデフォルトルートやDNSに使わせない
-- name: Find the interface on the workload network
-  ansible.builtin.set_fact:
-    workload_iface: >-
-      {{ ansible_facts.interfaces
-         | map('regex_replace', '[^A-Za-z0-9_]', '_')
-         | map('extract', ansible_facts)
-         | selectattr('macaddress', 'defined')
-         | selectattr('macaddress', 'equalto', (vm.nics | selectattr('address', 'equalto', infra_workload_ip) | first).mac)
-         | map(attribute='device')
-         | first }}
-
-- name: Read the connection on the workload network
-  ansible.builtin.command: "nmcli -g GENERAL.CONNECTION device show {{ workload_iface }}"
-  register: workload_connection
-  changed_when: false
-
-- name: Read whether the workload network may carry the default route
-  ansible.builtin.command:
-    argv: [nmcli, -g, ipv4.never-default, connection, show, "{{ workload_connection.stdout }}"]
-  register: workload_never_default
-  changed_when: false
-
-- name: Keep the default route and DNS on the NAT network
-  when: workload_never_default.stdout != 'yes'
-  block:
-    - name: Mark the workload network as never-default
-      ansible.builtin.command:
-        argv: [nmcli, connection, modify, "{{ workload_connection.stdout }}", ipv4.never-default, "yes", ipv4.ignore-auto-dns, "yes"]
-      changed_when: true
-
-    - name: Reapply the workload network settings
-      ansible.builtin.command: "nmcli device reapply {{ workload_iface }}"
-      changed_when: true
-
 - name: Allow http in firewalld
   ansible.builtin.include_tasks: firewalld.yml
   vars:

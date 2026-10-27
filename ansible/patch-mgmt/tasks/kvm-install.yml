@@ -3,11 +3,12 @@
 # インストーラはルートディスクだけを付けて起動する。Image BuilderのISOは「最初のディスク」を
 # 無条件にフォーマットするので、ミラー用データディスクはインストールが終わってから付ける
 # (kvm-finish.yml)。
+# VMのプロセス(qemuユーザー)がディスクまでたどれるように、ディレクトリには実行権限(x)を付ける
 - name: Create the VM directory - {{ vm.name }}
   ansible.builtin.file:
     path: "{{ libvirt_image_dir }}/{{ vm.name }}"
     state: directory
-    mode: "0700"
+    mode: "0711"
 
 - name: Create the root disk - {{ vm.name }}
   ansible.builtin.command:

@@ -1,0 +1,23 @@
+# {{ ansible_managed | default('Managed by ansible/patch-mgmt') }}
+{% set lab_net = libvirt_networks | selectattr('name', 'equalto', nic.network) | first %}
+[connection]
+id={{ nic.network }}
+type=ethernet
+autoconnect=true
+
+[ethernet]
+mac-address={{ nic.mac }}
+
+[ipv4]
+method=manual
+{% if nic_index == 0 %}
+address1={{ nic.address }}/{{ lab_net.prefix }},{{ lab_net.address }}
+dns={{ lab_net.address }};
+{% else %}
+# 2つ目以降のNICにはデフォルトルートとDNSを持たせない(infraの業務VM側のNICは、仮想FWで外への通信が絞られている)
+address1={{ nic.address }}/{{ lab_net.prefix }}
+never-default=true
+{% endif %}
+
+[ipv6]
+method=disabled

@@ -20,7 +20,7 @@
   tasks:
     - name: Check that the required commands are installed
       ansible.builtin.command: "which {{ item }}"
-      loop: [virsh, virt-install, qemu-img, nft, aws]
+      loop: [virsh, virt-install, virt-customize, qemu-img, nft, aws]
       changed_when: false
 
     - name: Read the host CPU flags

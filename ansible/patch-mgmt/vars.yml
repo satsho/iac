@@ -40,22 +40,23 @@ ssh_known_hosts_file: "~/.ssh/known_hosts_patch_mgmt"
 # patch-workload : NAT + 仮想FW。test / stg / prod と infra の2枚目のNIC
 #                  業務VMが外に出られるのは workload_egress_allowlist のドメインだけ(KVMホストのnftablesで制御)。
 #                  パッケージはinfraのミラー(同じネットワーク上なのでFWを通らない)から取る
-# IPアドレスは下の vms の nics を元に、libvirtのDHCPでMACアドレスに固定で払い出す。
+# libvirtのネットワークではDHCPを使わない(家のサーバでDHCPサーバ(Kea等)が動いていると、UDP 67番を
+# 取り合ってネットワークを起動できないため)。VMのIPは下の vms の nics を元に、インストール後の
+# 初回起動の前にディスクへ書き込んで固定する(1つ目のNICにだけデフォルトルートとDNSを設定する)。
+# 名前解決はlibvirtのdnsmasqが行う(VM名も引ける)。
 
 libvirt_networks:
   - name: patch-mgmt
     bridge: virbr-patchm
     forward: nat
     address: 192.168.150.1
-    netmask: 255.255.255.0
-    dhcp_range: [192.168.150.100, 192.168.150.199]
+    prefix: 24
   - name: patch-workload
     bridge: virbr-patchw
     forward: nat
     egress_firewall: true
     address: 192.168.151.1
-    netmask: 255.255.255.0
-    dhcp_range: [192.168.151.100, 192.168.151.199]
+    prefix: 24
 
 # 下の vms の nics と同じ値にしておく(rsyncの許可先・repoファイルに使う)
 repository_ip: 192.168.150.10

@@ -1,5 +1,9 @@
 <!-- {{ ansible_managed | default('Managed by ansible/patch-mgmt') }} -->
+{% if net.egress_firewall | default(false) %}
+<network xmlns:dnsmasq='http://libvirt.org/schemas/network/dnsmasq/1.0'>
+{% else %}
 <network>
+{% endif %}
   <name>{{ net.name }}</name>
 {% if net.forward == 'nat' %}
   <forward mode='nat'/>
@@ -16,4 +20,11 @@
 {% endfor %}
     </dhcp>
   </ip>
+{% if net.egress_firewall | default(false) %}
+  <!-- 仮想FW: 許可ドメインを名前解決した結果のIPを、KVMホストのnftablesの許可リスト(set)に入れる -->
+  <dnsmasq:options>
+    <dnsmasq:option value='nftset=/{{ workload_egress_allowlist.https | join('/') }}/4#inet#{{ workload_egress_firewall_table }}#https_v4'/>
+    <dnsmasq:option value='nftset=/{{ workload_egress_allowlist.ntp | join('/') }}/4#inet#{{ workload_egress_firewall_table }}#ntp_v4'/>
+  </dnsmasq:options>
+{% endif %}
 </network>

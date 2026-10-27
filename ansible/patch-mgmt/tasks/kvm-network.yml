@@ -1,23 +1,30 @@
 ---
 # KVMホスト: libvirtのネットワークを1つ定義して起動する(loop_var: net)
+- name: Render the network definition - {{ net.name }}
+  ansible.builtin.template:
+    src: network.xml.j2
+    dest: "{{ libvirt_image_dir }}/{{ net.name }}.xml"
+    mode: "0644"
+  register: net_xml
+
 - name: Check whether the libvirt network exists - {{ net.name }}
   ansible.builtin.command: "virsh net-info {{ net.name }}"
   register: net_info
   changed_when: false
   failed_when: false
 
-- name: Define the libvirt network - {{ net.name }}
-  when: net_info.rc != 0
-  block:
-    - name: Render the network definition - {{ net.name }}
-      ansible.builtin.template:
-        src: network.xml.j2
-        dest: "{{ libvirt_image_dir }}/{{ net.name }}.xml"
-        mode: "0644"
+# 定義が変わったときも登録し直す(動いているネットワークには、次に起動し直したときに反映される)
+- name: Register the network with libvirt - {{ net.name }}
+  ansible.builtin.command: "virsh net-define {{ libvirt_image_dir }}/{{ net.name }}.xml"
+  when: net_info.rc != 0 or net_xml.changed
+  changed_when: true
 
-    - name: Register the network with libvirt - {{ net.name }}
-      ansible.builtin.command: "virsh net-define {{ libvirt_image_dir }}/{{ net.name }}.xml"
-      changed_when: true
+- name: Tell that the running network still uses the old definition - {{ net.name }}
+  ansible.builtin.debug:
+    msg: >-
+      {{ net.name }} の定義を更新しました。動いているネットワークに反映するには、つながっているVMを止めてから
+      virsh net-destroy {{ net.name }} && virsh net-start {{ net.name }} を実行し、VMを起動し直してください。
+  when: net_info.rc == 0 and net_xml.changed and net_info.stdout is search('Active:\s+yes')
 
 - name: Start the libvirt network on boot - {{ net.name }}
   ansible.builtin.command: "virsh net-autostart {{ net.name }}"

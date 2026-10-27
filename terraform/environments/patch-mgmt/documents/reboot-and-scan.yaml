@@ -2,7 +2,7 @@ schemaVersion: '0.3'
 description: |-
   手動再起動パターン用。NoRebootでパッチを適用して「再起動待ち(InstalledPendingReboot)」に
   なっているインスタンスを再起動し、再起動後にスキャンしてコンプライアンスを最新にする。
-  EC2コンソールなどから再起動しただけだと、次のスキャンまではPatch Manager上で
+  virsh reboot やVMの中で再起動しただけだと、次のスキャンまではPatch Manager上で
   再起動待ちのまま残る(=次のステージのゲートチェックも通らない)ので、このRunbookを使う。
 assumeRole: '{{ AutomationAssumeRole }}'
 parameters:

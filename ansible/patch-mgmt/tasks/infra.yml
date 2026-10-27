@@ -1,8 +1,8 @@
 ---
-# infra: repositoryからrsyncで同期するミラー。業務VMにhttpで配り、業務VM向けのプロキシとNTPも兼ねる
+# infra: repositoryからrsyncで同期するミラー。業務VMのネットワークにもNICを持ち、httpで配る
 - name: Install the packages for the infra mirror
   ansible.builtin.dnf:
-    name: [httpd, rsync, squid]
+    name: [httpd, rsync]
     state: present
 
 - name: Install the mirror sync script
@@ -19,21 +19,7 @@
   loop: [patch-mirror-sync.service, patch-mirror-sync.timer]
   notify: Reload systemd
 
-- name: Configure the proxy for the workload VMs
-  ansible.builtin.template:
-    src: squid.conf.j2
-    dest: /etc/squid/squid.conf
-    mode: "0640"
-    group: squid
-  notify: Restart squid
-
-- name: Serve NTP to the workload network
-  ansible.builtin.lineinfile:
-    path: /etc/chrony.conf
-    line: "allow {{ workload_cidr }}"
-  notify: Restart chronyd
-
-# 業務VM側のネットワーク(隔離)はインターネットに出られないので、デフォルトルートやDNSに使わせない
+# 業務VM側のネットワークは仮想FWで外への通信が絞られているので、infraのデフォルトルートやDNSに使わせない
 - name: Find the interface on the workload network
   ansible.builtin.set_fact:
     workload_iface: >-
@@ -68,18 +54,18 @@
       ansible.builtin.command: "nmcli device reapply {{ workload_iface }}"
       changed_when: true
 
-- name: Allow http, the proxy and NTP in firewalld
+- name: Allow http in firewalld
   ansible.builtin.include_tasks: firewalld.yml
   vars:
-    firewalld_services: [http, squid, ntp]
+    firewalld_services: [http]
 
 - name: Apply the systemd and service changes
   ansible.builtin.meta: flush_handlers
 
 # 初回のミラー同期は、repositoryのreposyncが終わってから手動で行う(README参照)
-- name: Start the web server, proxy and mirror sync timer
+- name: Start the web server and mirror sync timer
   ansible.builtin.systemd:
     name: "{{ item }}"
     enabled: true
     state: started
-  loop: [httpd, squid, patch-mirror-sync.timer]
+  loop: [httpd, patch-mirror-sync.timer]

@@ -14,7 +14,7 @@
   vars:
     # true: ミラー用データディスクも消す(次に作るときはreposyncを最初からやり直す)
     wipe_data: false
-    # true: libvirtのネットワークも消す
+    # true: libvirtのネットワークと、業務VM向けの仮想FWも消す
     remove_networks: false
     only: "{{ vms | map(attribute='name') | list }}"
 
@@ -45,5 +45,25 @@
       register: net_undefine
       changed_when: net_undefine.rc == 0
       failed_when: false
+      when: remove_networks | bool
+      become: true
+
+    - name: Stop the egress firewall
+      ansible.builtin.systemd:
+        name: patch-mgmt-fw.service
+        enabled: false
+        state: stopped
+      register: fw_stop
+      failed_when: fw_stop.failed and 'Could not find the requested service' not in fw_stop.msg | default('')
+      when: remove_networks | bool
+      become: true
+
+    - name: Remove the egress firewall files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/systemd/system/patch-mgmt-fw.service
+        - /etc/nftables/patch-mgmt-fw.nft
       when: remove_networks | bool
       become: true

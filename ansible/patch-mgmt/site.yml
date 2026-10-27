@@ -20,7 +20,7 @@
   tasks:
     - name: Check that the required commands are installed
       ansible.builtin.command: "which {{ item }}"
-      loop: [virsh, virt-install, qemu-img, aws]
+      loop: [virsh, virt-install, qemu-img, nft, aws]
       changed_when: false
 
     - name: Read the host CPU flags
@@ -75,6 +75,12 @@
         state: directory
         mode: "0711"
       become: true
+
+    - name: Set up the egress firewall for the workload network
+      ansible.builtin.include_tasks:
+        file: tasks/kvm-firewall.yml
+        apply:
+          become: true
 
     - name: Define and start the libvirt networks
       ansible.builtin.include_tasks:
@@ -143,7 +149,7 @@
       loop_control:
         label: "{{ item.name }}"
 
-# infra のプロキシとミラーが業務VMの前提なので、repository / infra を先に設定する
+# infra のミラーが業務VMの前提なので、repository / infra を先に設定する
 - name: Configure the repository and infra servers
   hosts: lab_repository:lab_infra
   become: true
@@ -155,8 +161,6 @@
     rhel_org_id: "{{ lookup('ansible.builtin.env', 'RHEL_ORG_ID') }}"
     rhel_activation_key: "{{ lookup('ansible.builtin.env', 'RHEL_ACTIVATION_KEY') }}"
     vm_tags: "{{ {'Name': vm.name} | combine(vm.tags) }}"
-    # repository / infra はNATで直接外に出られるのでプロキシは使わない
-    vm_proxy_env: {}
 
   handlers:
     - name: Import the handlers
@@ -189,11 +193,6 @@
     rhel_org_id: "{{ lookup('ansible.builtin.env', 'RHEL_ORG_ID') }}"
     rhel_activation_key: "{{ lookup('ansible.builtin.env', 'RHEL_ACTIVATION_KEY') }}"
     vm_tags: "{{ {'Name': vm.name} | combine(vm.tags) }}"
-    # 業務VMは外へのルーティングが無いので、AWS(SSM)とRHSMへはinfraのプロキシを通す
-    vm_proxy_env:
-      https_proxy: "http://{{ infra_workload_ip }}:{{ proxy_port }}"
-      http_proxy: "http://{{ infra_workload_ip }}:{{ proxy_port }}"
-      no_proxy: "{{ infra_workload_ip }},localhost,127.0.0.1"
 
   handlers:
     - name: Import the handlers
@@ -203,7 +202,7 @@
     - name: Configure the hostname, timezone and SSH
       ansible.builtin.import_tasks: tasks/common.yml
 
-    - name: Point time and repositories at infra
+    - name: Point the repositories at the infra mirror
       ansible.builtin.import_tasks: tasks/workload.yml
 
     - name: Register the VM with Systems Manager

@@ -1,12 +1,6 @@
 ---
-# 業務VM(test/stg/prod): 時刻とリポジトリをinfraに向ける。SSMより先に行う(時刻がずれていると登録できない)
-- name: Synchronize time with infra
-  ansible.builtin.template:
-    src: chrony-workload.conf.j2
-    dest: /etc/chrony.conf
-    mode: "0644"
-  notify: Restart chronyd
-
+# 業務VM(test/stg/prod): パッケージはinfraのミラーだけから取る。
+# 仮想FWでCDNには届かないが、repoファイルの側でもCDNを使わない設定にしておく。
 - name: Find the existing repository files
   ansible.builtin.find:
     paths: /etc/yum.repos.d
@@ -29,6 +23,3 @@
     src: infra-mirror.repo.j2
     dest: /etc/yum.repos.d/infra-mirror.repo
     mode: "0644"
-
-- name: Apply the time settings
-  ansible.builtin.meta: flush_handlers

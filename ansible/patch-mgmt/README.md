@@ -2,7 +2,7 @@
 
 [`terraform/environments/patch-mgmt`](../../terraform/environments/patch-mgmt/README.md) で検証する
 5台の RHEL 10.2(repository / infra / test / stg / prod)を、家のサーバの KVM 上に作り、
-SSH で設定する playbook。設計(ネットワーク・プロキシ・パッチ適用の流れ)は Terraform 側の README を参照。
+SSH で設定する playbook。設計(ネットワーク・仮想FW・パッチ適用の流れ)は Terraform 側の README を参照。
 
 | ファイル | 内容 |
 |---|---|
@@ -11,13 +11,14 @@ SSH で設定する playbook。設計(ネットワーク・プロキシ・パッ
 | `destroy.yml` | VMを消し、SSMのマネージドノードとRHSMの登録を解除する |
 | `tasks/kvm-*.yml` | KVMホスト側(ネットワーク、ISOからのインストール) |
 | `tasks/*.yml`(それ以外) | VMの中(SSH・SSM Agent・RHSM・役割ごとの設定) |
-| `templates/` | VMに置く設定ファイル(reposync・rsync・squid・repoファイルなど) |
+| `templates/` | 仮想FW(nftables)と、VMに置く設定ファイル(reposync・rsync・repoファイルなど) |
 
 ## 流れ
 
 `site.yml` は3つのplayに分かれている。
 
 1. **KVMホスト**(ローカル実行)
+   - 業務VMのネットワーク向けの仮想FW(nftables。許可ドメインだけ外に出す)を用意する
    - libvirtのネットワーク2つを作る(VMのIPはMACアドレスでDHCP固定)
    - まだ無いVMを、Image BuilderのISOから全台同時に無人インストールする
    - インストールが終わって停止したVMから、ミラー用データディスクを付けて起動する
@@ -26,11 +27,11 @@ SSH で設定する playbook。設計(ネットワーク・プロキシ・パッ
    - SSH鍵の登録、パスワードでのSSHログインの停止、ホスト名・タイムゾーン
    - SSM Agentのインストールと登録(VMごとに使い捨てのアクティベーションを作る)、タグの同期
    - ISOの自動登録が済んでいるか確認し、リリースを10.2に固定してEUSリポジトリだけを有効にする
-   - ミラー用データディスクのマウント、役割ごとの設定(reposync / rsync / squid / NTP)
+   - ミラー用データディスクのマウント、役割ごとの設定(reposync / rsync / httpd)
 3. **test / stg / prod**(SSH)
-   - 時刻とリポジトリをinfraに向ける
-   - SSM Agentのインストールと登録(infraのプロキシ経由)、タグの同期
-   - RHSMへの登録(infraのプロキシ経由。ISOの自動登録は外に出られず失敗しているため)
+   - リポジトリをinfraのミラーに向ける
+   - SSM Agentのインストールと登録、タグの同期(仮想FWで許可したSSMの宛先に直接出る)
+   - ISOの自動登録が済んでいるか確認する(済んでいなければ activation key があれば登録、無ければ警告)
 
 例: `patch-test` の場合、`vars.yml` の `Env=test, PatchGroup=rhel10-test, RebootPolicy=auto` が
 マネージドノード(`mi-0abc...`)のタグになり、Terraform 側のメンテナンスウィンドウ
@@ -85,9 +86,9 @@ rm /tmp/<ダウンロードしたISO>.iso
 # SSMのアクティベーションを作れるAWSの認証情報(ssm:CreateActivation、ssm:AddTagsToResource、
 # iac-poc-patch-hybrid-node-role への iam:PassRole が要る)
 export AWS_PROFILE=<管理者のプロファイル>
-# 業務VMのRHSM登録に使う(repository / infra はISOの自動登録で済んでいれば不要)
-export RHEL_ORG_ID=<org id>
-export RHEL_ACTIVATION_KEY=<activation key>
+# (任意)ISOの自動登録が失敗していたときだけ使う。無くても進む(業務VMは警告だけ出す)
+# export RHEL_ORG_ID='<Org ID>'
+# export RHEL_ACTIVATION_KEY='<activation key の名前>'
 
 cd ansible/patch-mgmt
 ansible-playbook -k -K site.yml   # 初回: -k でVMのSSHパスワード、-K でsudoのパスワードを聞かれる
@@ -160,8 +161,10 @@ playbook を使わずに VM を消すと、RHSM のシステムと SSM の `mi-.
 
 | 症状 | 見るところ |
 |---|---|
+| ネットワークの起動で `dnsmasq: failed to bind DHCP server socket: Address already in use` | KVMホストの別のプロセスが DHCP のポート(UDP 67)を使っている。`ss -ulpn \| grep -E ':67\s'` で確認し、家の dnsmasq なら `bind-interfaces` と `interface=<LAN側のNIC>` で待ち受けを絞る(使っていなければ止める) |
 | 「インストールが終わって停止するのを待つ」で止まる | VNC でインストーラの画面を見る。ISO のキックスタートに `reboot` / `poweroff` が無いと、最後に Enter 待ちで止まる |
 | SSH がつながらない | `virsh domifaddr <VM名>` / `virsh net-dhcp-leases patch-mgmt` でIPが払い出されているか |
 | repository で EUS のリポジトリを有効にできない | サブスクリプションに EUS が無い可能性(Terraform 側 README の「前提 4.」) |
-| 業務VMの SSM 登録・RHSM 登録が失敗する | infra で `systemctl status squid`、`/var/log/squid/access.log` に `TCP_DENIED` が出ていないか |
-| SSM の操作が `InvalidSignatureException` などで失敗する | VM の時刻ずれ(`chronyc tracking`)。業務VMは infra を NTP サーバにしている |
+| 業務VMの SSM 登録・RHSM 登録が失敗する | KVMホストで `journalctl -k \| grep 'patch-mgmt-fw drop:'`(必要な宛先を落としていないか)と `nft list set inet patch_mgmt_fw https_v4`(許可リストに IP が入っているか) |
+| 許可リストが空のまま増えない | dnsmasq が SELinux に止められていないか(`ausearch -m avc -ts recent -c dnsmasq`)。playbook は `dnsmasq_use_ipset` を有効にしている |
+| SSM の操作が `InvalidSignatureException` などで失敗する | VM の時刻ずれ(`chronyc tracking`)。業務VMは仮想FWで許可した `rhel.pool.ntp.org` に合わせている |

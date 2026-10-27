@@ -1,0 +1,45 @@
+---
+# KVMホスト: 業務VMのネットワーク向けの仮想FW(nftables)。libvirtのネットワークより先に用意する。
+- name: Pick the network protected by the egress firewall
+  ansible.builtin.set_fact:
+    fw_net: "{{ libvirt_networks | selectattr('egress_firewall', 'defined') | selectattr('egress_firewall') | first }}"
+
+- name: Read whether dnsmasq may update nftables sets
+  ansible.builtin.command: getsebool dnsmasq_use_ipset
+  register: dnsmasq_ipset_bool
+  changed_when: false
+
+# dnsmasq(SELinuxのdnsmasq_t)がnftablesのsetを書き換えるには、このbooleanが要る
+- name: Allow dnsmasq to update nftables sets
+  ansible.builtin.command: setsebool -P dnsmasq_use_ipset 1
+  when: "'--> on' not in dnsmasq_ipset_bool.stdout"
+  changed_when: true
+
+- name: Install the firewall rules
+  ansible.builtin.template:
+    src: patch-mgmt-fw.nft.j2
+    dest: /etc/nftables/patch-mgmt-fw.nft
+    mode: "0600"
+  register: fw_rules
+
+- name: Install the service that loads the firewall rules
+  ansible.builtin.template:
+    src: patch-mgmt-fw.service.j2
+    dest: /etc/systemd/system/patch-mgmt-fw.service
+    mode: "0644"
+  register: fw_unit
+
+- name: Start the firewall on boot
+  ansible.builtin.systemd:
+    name: patch-mgmt-fw.service
+    daemon_reload: "{{ fw_unit.changed }}"
+    enabled: true
+    state: started
+  register: fw_started
+
+# ルールを変えたときはテーブルを作り直す(許可リストは空に戻るが、業務VMが次に名前解決したときにdnsmasqが入れ直す)
+- name: Reload the firewall rules
+  ansible.builtin.systemd:
+    name: patch-mgmt-fw.service
+    state: restarted
+  when: (fw_rules.changed or fw_unit.changed) and not fw_started.changed

@@ -1,35 +1,32 @@
 ---
-# 業務VM: RHSMには登録する(サブスクリプションの利用状況を正しく残すため)が、通信はinfraのプロキシ経由にし、
-# subscription-managerにはrepoファイルを管理させない(CDNのリポジトリは使わない)。
-# ISOの自動登録は初回起動時に外へ出られず失敗しているはずなので、ここで登録する。
-- name: Route subscription-manager through the infra proxy and stop it managing repo files
-  ansible.builtin.command:
-    argv:
-      - subscription-manager
-      - config
-      - "--server.proxy_hostname={{ infra_workload_ip }}"
-      - "--server.proxy_port={{ proxy_port }}"
-      - --rhsm.manage_repos=0
+# 業務VM: RHSMへの登録はISOの自動登録に任せる(仮想FWで subscription.rhsm.redhat.com だけは通している)。
+# subscription-managerにはrepoファイルを管理させず、CDNのリポジトリは使わない。
+- name: Stop subscription-manager from managing repo files
+  ansible.builtin.command: subscription-manager config --rhsm.manage_repos=0
   changed_when: false
 
-- name: Check the registration
+- name: Wait for the automatic registration configured in the ISO
   ansible.builtin.command: subscription-manager identity
   register: rhsm_identity
+  until: rhsm_identity.rc == 0
+  retries: 20
+  delay: 30
   changed_when: false
   failed_when: false
 
-- name: Register with Red Hat Subscription Management through the proxy
-  when: rhsm_identity.rc != 0
-  block:
-    - name: Check that the Red Hat activation key is provided
-      ansible.builtin.assert:
-        that:
-          - rhel_org_id | length > 0
-          - rhel_activation_key | length > 0
-        fail_msg: 業務VMのRHSM登録に、環境変数 RHEL_ORG_ID / RHEL_ACTIVATION_KEY が必要です
+# 自動登録が終わっていない場合だけ、環境変数のactivation keyがあれば登録する。
+# 無ければ止めずに警告だけ出す(パッチ適用はinfraのミラーで行うので、登録が無くても検証は進められる)。
+- name: Register with the activation key
+  ansible.builtin.command:
+    argv: [subscription-manager, register, "--org={{ rhel_org_id }}", "--activationkey={{ rhel_activation_key }}"]
+  when: rhsm_identity.rc != 0 and rhel_org_id | length > 0 and rhel_activation_key | length > 0
+  changed_when: true
+  no_log: true
 
-    - name: Register with the activation key
-      ansible.builtin.command:
-        argv: [subscription-manager, register, "--org={{ rhel_org_id }}", "--activationkey={{ rhel_activation_key }}"]
-      changed_when: true
-      no_log: true
+- name: Warn that the VM is not registered with RHSM
+  ansible.builtin.debug:
+    msg: >-
+      {{ vm.name }} はRHSMに登録されていません。ISOの自動登録の状態(journalctl -b | grep -i -E 'rhc|subscription')と
+      KVMホストの仮想FWのログ(journalctl -k | grep patch-mgmt-fw)を確認するか、
+      環境変数 RHEL_ORG_ID / RHEL_ACTIVATION_KEY を設定して流し直してください。
+  when: rhsm_identity.rc != 0 and (rhel_org_id | length == 0 or rhel_activation_key | length == 0)

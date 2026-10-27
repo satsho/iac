@@ -106,6 +106,26 @@
       ansible.builtin.set_fact:
         new_vms: "{{ existing_vms.results | selectattr('rc', 'ne', 0) | map(attribute='item') | list }}"
 
+    # インストールが終わるとISOを外すので、ISOが付いたままのVMはインストール中か、前回の実行が
+    # 途中で止まったもの。流し直したときは、それらも「インストールの完了を待って起動する」から続ける
+    - name: List the disks of the existing VMs
+      ansible.builtin.command: "virsh domblklist {{ item.item.name }}"
+      loop: "{{ existing_vms.results | selectattr('rc', 'eq', 0) | list }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      register: existing_disks
+      changed_when: false
+      become: true
+
+    - name: Pick the VMs whose installation has not been finished
+      ansible.builtin.set_fact:
+        unfinished_vms: >-
+          {{ new_vms
+             + (existing_disks.results
+                | selectattr('stdout', 'search', rhel_install_iso | regex_escape)
+                | map(attribute='item.item')
+                | list) }}
+
     # インストールは全台同時に始め(virt-installはすぐ戻る)、終わったものから順に起動する
     - name: Start the installations from the ISO
       ansible.builtin.include_tasks:
@@ -122,7 +142,7 @@
         file: tasks/kvm-finish.yml
         apply:
           become: true
-      loop: "{{ new_vms }}"
+      loop: "{{ unfinished_vms }}"
       loop_control:
         loop_var: vm
         label: "{{ vm.name }}"

@@ -24,7 +24,7 @@ SSH で設定する playbook。設計(ネットワーク・仮想FW・パッチ�
    - まだ無いVMを、Image BuilderのISOから全台同時に無人インストールする
    - インストールが終わって停止したVMから、初回起動の前に固定IPの設定をディスクへ書き込み
      (`virt-customize`)、ミラー用データディスクを付けて起動する
-     (ISOは最初のディスクを無条件にフォーマットするので、データディスクはインストール後に付ける)
+     (データディスクを誤ってインストール先にしないよう、データディスクはインストール後に付ける)
 2. **repository / infra**(SSH)
    - SSH鍵の登録、パスワードでのSSHログインの停止、ホスト名・タイムゾーン
    - SSM Agentのインストールと登録(VMごとに使い捨てのアクティベーションを作る)、タグの同期
@@ -166,7 +166,8 @@ playbook を使わずに VM を消すと、RHSM のシステムと SSM の `mi-.
 |---|---|
 | ネットワークの起動で `dnsmasq: failed to bind DHCP server socket: Address already in use` | 古い定義(DHCPあり)のまま。`site.yml` を流し直すと DHCP なしの定義に置き換わる |
 | ネットワークの起動で `dnsmasq: failed to create listening socket for 192.168.15x.1: Address already in use` | KVMホストのDNSサーバが全部のアドレスで53番を待ち受けていて、libvirtがブリッジを作った瞬間にそのアドレスも取ってしまう(`ss -H -tulpn 'sport = :53'` で確認)。BIND(named)なら `listen-on port 53 { !192.168.150.0/24; !192.168.151.0/24; any; };` のように検証用のネットワークを除き、`named-checkconf && systemctl reload named` |
-| 「インストールが終わって停止するのを待つ」で止まる | VNC でインストーラの画面を見る。ISO のキックスタートに `reboot` / `poweroff` が無いと、最後に Enter 待ちで止まる |
+| 「インストールが終わって停止するのを待つ」で止まる | VNC でインストーラの画面を見る(`virsh screenshot <VM名> /tmp/<VM名>.png` でも見られる)。ISO のキックスタートに `reboot` / `poweroff` が無いと、最後に Reboot System 待ちで止まる |
+| インストーラが INSTALLATION SUMMARY で止まり、Installation Destination が `Kickstart insufficient` | ISO のキックスタートにインストール先ディスクの指定が無い。VNC で Installation Destination → ディスク(vda)を選んで Done → Begin Installation、終わったら Reboot System(VMが停止し、playbook が続きを進める)。playbook の待ち時間を過ぎても、流し直せば「停止を待って起動する」から続ける |
 | SSH がつながらない | `virsh console <VM名>` で入り、`nmcli -f NAME,DEVICE connection show --active` と `ip -br addr` で `vars.yml` のIPが付いているか |
 | repository で EUS のリポジトリを有効にできない | サブスクリプションに EUS が無い可能性(Terraform 側 README の「前提 4.」) |
 | 業務VMの SSM 登録・RHSM 登録が失敗する | KVMホストで `journalctl -k \| grep 'patch-mgmt-fw drop:'`(必要な宛先を落としていないか)と `nft list set inet patch_mgmt_fw https_v4`(許可リストに IP が入っているか) |

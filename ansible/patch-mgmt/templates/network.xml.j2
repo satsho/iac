@@ -1,16 +1,17 @@
 <!-- {{ ansible_managed | default('Managed by ansible/patch-mgmt') }} -->
-{% if net.egress_firewall | default(false) %}
-<network xmlns:dnsmasq='http://libvirt.org/schemas/network/dnsmasq/1.0'>
-{% else %}
 <network>
-{% endif %}
   <name>{{ net.name }}</name>
   <uuid>{{ net_uuid }}</uuid>
 {% if net.forward == 'nat' %}
   <forward mode='nat'/>
 {% endif %}
   <bridge name='{{ net.bridge }}' stp='on' delay='0'/>
-  <!-- DHCPは使わない(VMのIPはディスクに書き込んで固定する。kvm-finish.yml)。dnsmasqは名前解決だけを行う -->
+  <!-- DHCPは使わない(VMのIPはディスクに書き込んで固定する。kvm-finish.yml) -->
+{% if net.egress_firewall | default(false) %}
+  <!-- 名前解決はlibvirtのdnsmasqではなく、仮想FWの許可リストを作るDNSサーバ(patch-mgmt-dns.service)が行う -->
+  <dns enable='no'/>
+{% else %}
+  <!-- libvirtのdnsmasqは名前解決だけを行う -->
   <dns>
 {% for vm in vms %}
 {% for nic in vm.nics if nic.network == net.name %}
@@ -20,12 +21,6 @@
 {% endfor %}
 {% endfor %}
   </dns>
-  <ip address='{{ net.address }}' prefix='{{ net.prefix }}'/>
-{% if net.egress_firewall | default(false) %}
-  <!-- 仮想FW: 許可ドメインを名前解決した結果のIPを、KVMホストのnftablesの許可リスト(set)に入れる -->
-  <dnsmasq:options>
-    <dnsmasq:option value='nftset=/{{ workload_egress_allowlist.https | join('/') }}/4#inet#{{ workload_egress_firewall_table }}#https_v4'/>
-    <dnsmasq:option value='nftset=/{{ workload_egress_allowlist.ntp | join('/') }}/4#inet#{{ workload_egress_firewall_table }}#ntp_v4'/>
-  </dnsmasq:options>
 {% endif %}
+  <ip address='{{ net.address }}' prefix='{{ net.prefix }}'/>
 </network>

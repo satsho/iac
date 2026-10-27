@@ -18,7 +18,8 @@ SSH で設定する playbook。設計(ネットワーク・仮想FW・パッチ�
 `site.yml` は3つのplayに分かれている。
 
 1. **KVMホスト**(ローカル実行)
-   - 業務VMのネットワーク向けの仮想FW(nftables。許可ドメインだけ外に出す)を用意する
+   - 業務VMのネットワーク向けの仮想FW(nftables。許可ドメインだけ外に出す)と、その許可リストを作る
+     業務VM用のDNSサーバ(`patch-mgmt-dns.service`)を用意する
    - libvirtのネットワーク2つを作る(DHCPは使わない。家のサーバのDHCPサーバと共存できる)
    - まだ無いVMを、Image BuilderのISOから全台同時に無人インストールする
    - インストールが終わって停止したVMから、初回起動の前に固定IPの設定をディスクへ書き込み
@@ -169,5 +170,5 @@ playbook を使わずに VM を消すと、RHSM のシステムと SSM の `mi-.
 | SSH がつながらない | `virsh console <VM名>` で入り、`nmcli -f NAME,DEVICE connection show --active` と `ip -br addr` で `vars.yml` のIPが付いているか |
 | repository で EUS のリポジトリを有効にできない | サブスクリプションに EUS が無い可能性(Terraform 側 README の「前提 4.」) |
 | 業務VMの SSM 登録・RHSM 登録が失敗する | KVMホストで `journalctl -k \| grep 'patch-mgmt-fw drop:'`(必要な宛先を落としていないか)と `nft list set inet patch_mgmt_fw https_v4`(許可リストに IP が入っているか) |
-| 許可リストが空のまま増えない | dnsmasq が SELinux に止められていないか(`ausearch -m avc -ts recent -c dnsmasq`)。playbook は `dnsmasq_use_ipset` を有効にしている |
+| 許可リストが空のまま増えない | 業務VMの DNS サーバのログ(`journalctl -u patch-mgmt-dns`)。許可したときは `allow <名前> -> <IP>` と出る。業務VMで `getent ahostsv4 ssm.ap-northeast-1.amazonaws.com` が答えを返すか |
 | SSM の操作が `InvalidSignatureException` などで失敗する | VM の時刻ずれ(`chronyc tracking`)。業務VMは仮想FWで許可した `rhel.pool.ntp.org` に合わせている |

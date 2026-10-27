@@ -1,8 +1,8 @@
 # {{ ansible_managed }}
 [Unit]
 Description=Egress firewall for the patch-mgmt workload network
-# dnsmasq(libvirtのネットワーク)がsetにIPを入れる前に、テーブルを作っておく
-Before=virtnetworkd.service libvirtd.service
+# 業務VMが動き出す前にFWを入れておく
+Before=virtqemud.service virtnetworkd.service libvirtd.service
 
 [Service]
 Type=oneshot

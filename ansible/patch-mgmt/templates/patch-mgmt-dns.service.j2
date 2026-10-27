@@ -1,0 +1,14 @@
+# {{ ansible_managed }}
+[Unit]
+Description=DNS server for the patch-mgmt workload network (fills the egress allowlist)
+# 許可リストのsetを持つテーブルを先に作っておく
+After=network.target patch-mgmt-fw.service
+Wants=patch-mgmt-fw.service
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/sbin/patch-mgmt-dns.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

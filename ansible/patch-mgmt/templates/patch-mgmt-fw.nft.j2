@@ -1,6 +1,6 @@
 # {{ ansible_managed }}
 # 業務VMのネットワーク({{ fw_net.name }} / {{ fw_net.bridge }})から外へ出る通信を、許可したドメイン宛てだけに絞る仮想FW。
-# 許可ドメインのIPアドレスは、libvirtのdnsmasqが業務VMの名前解決のたびに下のsetへ自動で追加する(nftset)。
+# 許可ドメインのIPアドレスは、業務VMのDNSサーバ(patch-mgmt-dns.service)が名前解決のたびに下のsetへ自動で追加する。
 # 例: 業務VMが ssm.ap-northeast-1.amazonaws.com を引く → 返ったIPが https_v4 に入る → そのIPへのTCP 443だけ通る。
 #     cdn.redhat.com は許可リストに無いので、名前は引けても通信はここで落ちる。
 #
@@ -9,7 +9,7 @@ table inet {{ workload_egress_firewall_table }}
 delete table inet {{ workload_egress_firewall_table }}
 
 table inet {{ workload_egress_firewall_table }} {
-  # 名前解決の結果が変わっても古いIPが残り続けないよう、1日で消す(使われ続けているものはdnsmasqが入れ直す)
+  # 名前解決の結果が変わっても古いIPが残り続けないよう、1日で消す(使われ続けているものは次の名前解決で入れ直す)
   set https_v4 {
     type ipv4_addr
     timeout 1d

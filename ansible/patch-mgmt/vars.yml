@@ -43,7 +43,7 @@ ssh_known_hosts_file: "~/.ssh/known_hosts_patch_mgmt"
 # libvirtのネットワークではDHCPを使わない(家のサーバでDHCPサーバ(Kea等)が動いていると、UDP 67番を
 # 取り合ってネットワークを起動できないため)。VMのIPは下の vms の nics を元に、インストール後の
 # 初回起動の前にディスクへ書き込んで固定する(1つ目のNICにだけデフォルトルートとDNSを設定する)。
-# 名前解決はlibvirtのdnsmasqが行う(VM名も引ける)。
+# 名前解決は、patch-mgmt はlibvirtのdnsmasq(VM名も引ける)、patch-workload は仮想FWのDNSサーバが行う。
 
 libvirt_networks:
   - name: patch-mgmt
@@ -66,8 +66,8 @@ infra_workload_ip: 192.168.151.11
 # ---------------------------------------------------------------------------
 # 業務VMの仮想FW(KVMホストのnftables)
 # ---------------------------------------------------------------------------
-# 業務VMが名前解決したときに、libvirtのdnsmasqが下のドメイン(サブドメインを含む)のIPアドレスを
-# nftablesの許可リストに自動で追加する。リストに無い宛先(cdn.redhat.com、家のLANなど)への通信は
+# 業務VMのDNSサーバ(KVMホストの patch-mgmt-dns.service)が、名前解決のたびに下のドメイン(サブドメインを含む)の
+# IPアドレスをnftablesの許可リストに自動で追加する。リストに無い宛先(cdn.redhat.com、家のLANなど)への通信は
 # KVMホストで落とし、カーネルログに "patch-mgmt-fw drop:" として残す。
 workload_egress_firewall_table: patch_mgmt_fw
 workload_egress_allowlist:

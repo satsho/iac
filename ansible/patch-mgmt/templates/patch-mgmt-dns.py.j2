@@ -1,0 +1,211 @@
+#!/usr/bin/python3
+# {{ ansible_managed }}
+"""業務VMのネットワーク({{ fw_net.name }})のDNSサーバ。仮想FWの許可リストを作る。
+
+業務VMからの問い合わせを、KVMホストのDNSサーバ(/etc/resolv.conf)へそのまま転送する。
+答えが許可ドメイン(サブドメインを含む)のものなら、答えに入っていたIPv4アドレスを、
+VMに答えを返す「前に」nftablesの許可リスト(set)へ入れる。
+RHELのdnsmasqはnftset機能なしでビルドされているので、その代わりに使う。
+
+例: 業務VMが ssm.ap-northeast-1.amazonaws.com を引く
+    → KVMホストのDNSサーバが 52.119.x.x を返す
+    → inet {{ workload_egress_firewall_table }} の https_v4 に 52.119.x.x を入れてから、VMに答えを返す
+    → VMはすぐにそのIPのTCP 443へつなげる
+"""
+import ipaddress
+import logging
+import socket
+import socketserver
+import struct
+import subprocess
+import threading
+
+LISTEN = ("{{ fw_net.address }}", 53)
+CLIENTS = ipaddress.ip_network("{{ fw_net.address }}/{{ fw_net.prefix }}", strict=False)
+TABLE = "{{ workload_egress_firewall_table }}"
+# nftablesのset名 → 許可ドメイン
+ALLOWLIST = {
+    "https_v4": {{ workload_egress_allowlist.https | to_json }},
+    "ntp_v4": {{ workload_egress_allowlist.ntp | to_json }},
+}
+UPSTREAM_TIMEOUT = 3
+# ブリッジ(libvirtのネットワーク)がまだ無くても、そのアドレスで待ち受けられるようにする
+IP_FREEBIND = getattr(socket, "IP_FREEBIND", 15)
+
+log = logging.getLogger("patch-mgmt-dns")
+
+
+def upstreams():
+    servers = []
+    with open("/etc/resolv.conf", encoding="ascii", errors="replace") as f:
+        for line in f:
+            fields = line.split()
+            if len(fields) >= 2 and fields[0] == "nameserver" and fields[1] != LISTEN[0]:
+                servers.append(fields[1])
+    return servers
+
+
+def forward_udp(query):
+    for server in upstreams():
+        family = socket.AF_INET6 if ":" in server else socket.AF_INET
+        with socket.socket(family, socket.SOCK_DGRAM) as s:
+            s.settimeout(UPSTREAM_TIMEOUT)
+            try:
+                s.connect((server, 53))
+                s.send(query)
+                while True:
+                    reply = s.recv(65535)
+                    if reply[:2] == query[:2]:
+                        return reply
+            except OSError as e:
+                log.warning("upstream %s (udp): %s", server, e)
+    return None
+
+
+def recv_exact(s, n):
+    data = b""
+    while len(data) < n:
+        chunk = s.recv(n - len(data))
+        if not chunk:
+            raise ConnectionError("connection closed")
+        data += chunk
+    return data
+
+
+def forward_tcp(query):
+    for server in upstreams():
+        try:
+            with socket.create_connection((server, 53), timeout=UPSTREAM_TIMEOUT) as s:
+                s.sendall(struct.pack("!H", len(query)) + query)
+                return recv_exact(s, struct.unpack("!H", recv_exact(s, 2))[0])
+        except OSError as e:
+            log.warning("upstream %s (tcp): %s", server, e)
+    return None
+
+
+def read_name(msg, off):
+    """DNSメッセージの off から名前を読み、(名前, 名前の次の位置) を返す(圧縮ポインタに対応)"""
+    labels = []
+    end = None
+    for _ in range(128):
+        n = msg[off]
+        if n == 0:
+            off += 1
+            break
+        if n & 0xC0 == 0xC0:
+            if end is None:
+                end = off + 2
+            off = ((n & 0x3F) << 8) | msg[off + 1]
+            continue
+        labels.append(msg[off + 1:off + 1 + n].decode("ascii", "replace").lower())
+        off += 1 + n
+    else:
+        raise ValueError("name too long or pointer loop")
+    return ".".join(labels), end if end is not None else off
+
+
+def answer_ipv4(reply):
+    """答えから、問い合わせた名前と、答えに入っているIPv4アドレス(CNAMEの先を含む)を返す"""
+    qdcount, ancount = struct.unpack("!HH", reply[4:8])
+    if qdcount != 1:
+        return None, []
+    qname, off = read_name(reply, 12)
+    off += 4  # QTYPE, QCLASS
+    addrs = []
+    for _ in range(ancount):
+        _, off = read_name(reply, off)
+        rtype, rclass, _, rdlength = struct.unpack("!HHIH", reply[off:off + 10])
+        off += 10
+        if rtype == 1 and rclass == 1 and rdlength == 4:
+            addrs.append(socket.inet_ntoa(reply[off:off + 4]))
+        off += rdlength
+    return qname, addrs
+
+
+def allowed_sets(qname):
+    return [
+        name for name, domains in ALLOWLIST.items()
+        if any(qname == d or qname.endswith("." + d) for d in domains)
+    ]
+
+
+def resolve(query, forward):
+    reply = forward(query)
+    if not reply:
+        return None
+    try:
+        qname, addrs = answer_ipv4(reply)
+    except (IndexError, ValueError, struct.error):
+        return reply
+    sets = allowed_sets(qname) if addrs else []
+    if sets:
+        # 例: add element inet patch_mgmt_fw https_v4 { 52.119.x.x, 52.119.y.y }
+        commands = "; ".join(
+            "add element inet %s %s { %s }" % (TABLE, name, ", ".join(addrs)) for name in sets
+        )
+        result = subprocess.run(["/usr/sbin/nft", commands], capture_output=True, text=True)
+        if result.returncode == 0:
+            log.info("allow %s -> %s (%s)", qname, ", ".join(addrs), ", ".join(sets))
+        else:
+            log.error("nft failed for %s: %s", qname, result.stderr.strip())
+    return reply
+
+
+def from_workload(client_address):
+    return ipaddress.ip_address(client_address[0]) in CLIENTS
+
+
+class UDPHandler(socketserver.BaseRequestHandler):
+    def handle(self):
+        query, sock = self.request
+        if len(query) < 12 or not from_workload(self.client_address):
+            return
+        reply = resolve(query, forward_udp)
+        if reply:
+            sock.sendto(reply, self.client_address)
+
+
+class TCPHandler(socketserver.BaseRequestHandler):
+    def handle(self):
+        if not from_workload(self.client_address):
+            return
+        self.request.settimeout(10)
+        try:
+            while True:
+                query = recv_exact(self.request, struct.unpack("!H", recv_exact(self.request, 2))[0])
+                reply = resolve(query, forward_tcp)
+                if not reply:
+                    return
+                self.request.sendall(struct.pack("!H", len(reply)) + reply)
+        except OSError:
+            return
+
+
+class FreebindMixin:
+    allow_reuse_address = True
+    daemon_threads = True
+
+    def server_bind(self):
+        self.socket.setsockopt(socket.IPPROTO_IP, IP_FREEBIND, 1)
+        super().server_bind()
+
+
+class UDPServer(FreebindMixin, socketserver.ThreadingUDPServer):
+    pass
+
+
+class TCPServer(FreebindMixin, socketserver.ThreadingTCPServer):
+    pass
+
+
+def main():
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    tcp = TCPServer(LISTEN, TCPHandler)
+    udp = UDPServer(LISTEN, UDPHandler)
+    threading.Thread(target=tcp.serve_forever, daemon=True).start()
+    log.info("listening on %s:%d", *LISTEN)
+    udp.serve_forever()
+
+
+if __name__ == "__main__":
+    main()

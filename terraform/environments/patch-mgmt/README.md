@@ -96,12 +96,16 @@ nftables は IP アドレスでしか判定できないので、ドメインは 
 
 ```
 業務VM が ssm.ap-northeast-1.amazonaws.com を名前解決
-  → libvirt の dnsmasq(業務VMの DNS サーバ)が答えを返すと同時に、
-    返した IP を nftables の許可リスト(set)に入れる(dnsmasq の nftset 機能)
+  → 業務VMの DNS サーバ(KVMホストの patch-mgmt-dns.service)が、答えを返す前に
+    その IP を nftables の許可リスト(set)に入れる
   → その IP への TCP 443 だけ、KVMホストを通過できる
 業務VM が cdn.redhat.com を名前解決
   → 名前は引けるが、許可リストには入らないので通信は KVMホストで落ちる
 ```
+
+業務VMの DNS サーバは、問い合わせを KVMホストの DNS サーバへそのまま転送し、許可ドメインの答えの IP を
+許可リストに入れるだけの小さなプログラム(Python の標準ライブラリだけで動く)。RHEL の dnsmasq は
+nftables の set に書き込む機能(nftset)なしでビルドされているので、libvirt の dnsmasq の代わりに使う。
 
 パッケージは infra のミラー(同じネットワーク上の 192.168.151.11)から直接 http で取るので、
 仮想FWは通らない。許可するドメインは `ansible/patch-mgmt/vars.yml` の `workload_egress_allowlist` で変えられる。

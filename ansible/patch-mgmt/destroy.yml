@@ -48,11 +48,12 @@
       when: remove_networks | bool
       become: true
 
-    - name: Stop the egress firewall
+    - name: Stop the egress firewall and its DNS server
       ansible.builtin.systemd:
-        name: patch-mgmt-fw.service
+        name: "{{ item }}"
         enabled: false
         state: stopped
+      loop: [patch-mgmt-dns.service, patch-mgmt-fw.service]
       register: fw_stop
       failed_when: fw_stop.failed and 'Could not find the requested service' not in fw_stop.msg | default('')
       when: remove_networks | bool
@@ -63,6 +64,8 @@
         path: "{{ item }}"
         state: absent
       loop:
+        - /etc/systemd/system/patch-mgmt-dns.service
+        - /usr/local/sbin/patch-mgmt-dns.py
         - /etc/systemd/system/patch-mgmt-fw.service
         - /etc/nftables/patch-mgmt-fw.nft
       when: remove_networks | bool

@@ -164,6 +164,7 @@ playbook を使わずに VM を消すと、RHSM のシステムと SSM の `mi-.
 | 症状 | 見るところ |
 |---|---|
 | ネットワークの起動で `dnsmasq: failed to bind DHCP server socket: Address already in use` | 古い定義(DHCPあり)のまま。`site.yml` を流し直すと DHCP なしの定義に置き換わる |
+| ネットワークの起動で `dnsmasq: failed to create listening socket for 192.168.15x.1: Address already in use` | KVMホストのDNSサーバが全部のアドレスで53番を待ち受けていて、libvirtがブリッジを作った瞬間にそのアドレスも取ってしまう(`ss -H -tulpn 'sport = :53'` で確認)。BIND(named)なら `listen-on port 53 { !192.168.150.0/24; !192.168.151.0/24; any; };` のように検証用のネットワークを除き、`named-checkconf && systemctl reload named` |
 | 「インストールが終わって停止するのを待つ」で止まる | VNC でインストーラの画面を見る。ISO のキックスタートに `reboot` / `poweroff` が無いと、最後に Enter 待ちで止まる |
 | SSH がつながらない | `virsh console <VM名>` で入り、`nmcli -f NAME,DEVICE connection show --active` と `ip -br addr` で `vars.yml` のIPが付いているか |
 | repository で EUS のリポジトリを有効にできない | サブスクリプションに EUS が無い可能性(Terraform 側 README の「前提 4.」) |

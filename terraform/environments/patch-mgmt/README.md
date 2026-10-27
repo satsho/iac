@@ -57,7 +57,7 @@ Systems Manager(Fleet Manager / Patch Manager / メンテナンスウィンド�
 
 ### 1. VMはSSM Hybrid Activationで登録する(家のサーバ本体と同じ仕組み)
 
-EC2 ではないので、インスタンスプロファイルの代わりに **アクティベーション** で SSM に登録する。
+家のサーバの VM は **アクティベーション**(Hybrid Activation)で SSM に登録する。
 Ansible が SSM Agent をまだ登録していない VM を見つけると、その VM 専用のアクティベーション
 (登録1回限り)をタグ付きで作り、SSH で `amazon-ssm-agent -register` する。
 
@@ -72,20 +72,20 @@ Ansible が SSM Agent をまだ登録していない VM を見つけると、そ
 
 ### 2. Session Manager は使わず SSH で管理する
 
-EC2 以外のノードに Session Manager でつなぐには有料の **advanced-instances tier** が必要になる
+家のサーバの VM(オンプレのノード)に Session Manager でつなぐには、有料の **advanced-instances tier** が必要になる
 (アカウント・リージョン単位の設定なので、家のサーバ本体も課金対象になる)。この検証では使わず、
 **SSH**(家のサーバを踏み台にする。外出先からは Tailscale で家のサーバに入る)で管理する。
 Patch Manager・Run Command・メンテナンスウィンドウ・Automation は無料の standard tier で使える。
 
 ### 3. 業務VMは「仮想FW」で必要な宛先だけ外に出す
 
-AWS では VPC エンドポイントで SSM を閉域から使えたが、家のサーバでは SSM の宛先は
-インターネット上にしかない。そこで業務VMのネットワーク(`patch-workload`)は NAT にしたうえで、
-**KVMホストの nftables を仮想FWにして、許可したドメイン宛ての通信だけを通す**。
+業務VMを SSM で管理するには、SSM の宛先(インターネット上にある)へ出られる必要がある。
+そこで業務VMのネットワーク(`patch-workload`)は外に出られる設定(libvirt の NAT。家のサーバが VM の通信を
+中継する方式)にしたうえで、**KVMホストの nftables を仮想FWにして、許可したドメイン宛ての通信だけを通す**。
 
 | 宛先 | 用途 | 業務VMから |
 |---|---|---|
-| `ssm` / `ssmmessages` / `ec2messages`(TCP 443) | SSM Agent | 許可 |
+| `ssm` / `ssmmessages` / `ec2messages`(TCP 443) | SSM Agent(`ec2messages` は SSM Agent の通信先の名前で、EC2 は使っていない) | 許可 |
 | `logs`(TCP 443) | Run Command 出力 | 許可 |
 | `s3.ap-northeast-1.amazonaws.com` とそのサブドメイン(TCP 443) | SSM Agent 本体、パッチ処理用ファイル | 許可 |
 | `subscription.rhsm.redhat.com`(TCP 443) | RHSM 登録(ISO の自動登録) | 許可 |
@@ -108,7 +108,7 @@ nftables は IP アドレスでしか判定できないので、ドメインは 
 
 ### 4. サブスクリプションとEUS
 
-KVM 上の VM は PAYG ではないので、5台とも自分の Red Hat アカウントで RHSM に登録する
+5台とも、自分の Red Hat アカウントのサブスクリプションで RHSM に登録する
 (Developer Subscription for Individuals なら16台まで)。
 
 - 5台とも ISO の自動登録で登録される(業務VMも、仮想FWで `subscription.rhsm.redhat.com` だけは通している)

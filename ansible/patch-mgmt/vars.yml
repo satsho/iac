@@ -74,7 +74,7 @@ workload_egress_allowlist:
   https:
     - ssm.ap-northeast-1.amazonaws.com          # SSM Agent
     - ssmmessages.ap-northeast-1.amazonaws.com  # SSM Agent
-    - ec2messages.ap-northeast-1.amazonaws.com  # SSM Agent
+    - ec2messages.ap-northeast-1.amazonaws.com  # SSM Agent(名前にec2と付くが、オンプレのVMでも使う通信先)
     - logs.ap-northeast-1.amazonaws.com         # Run Commandの出力
     - s3.ap-northeast-1.amazonaws.com           # SSM Agent本体、パッチ処理用ファイル(バケットのサブドメインを含む)
     - subscription.rhsm.redhat.com              # RHSMへの登録(ISOの自動登録)

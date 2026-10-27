@@ -37,8 +37,9 @@ ssh_known_hosts_file: "~/.ssh/known_hosts_patch_mgmt"
 # ネットワーク
 # ---------------------------------------------------------------------------
 # patch-mgmt     : NAT。repository / infra がRed Hat CDNとAWS(SSM)に出るためのネットワーク
-# patch-workload : 隔離(外部へのルーティング無し)。test / stg / prod と infra の2枚目のNIC
-#                  業務VMはinfraのミラー(http)とプロキシ(SSM・RHSMの宛先だけ許可)しか使えない
+# patch-workload : NAT + 仮想FW。test / stg / prod と infra の2枚目のNIC
+#                  業務VMが外に出られるのは workload_egress_allowlist のドメインだけ(KVMホストのnftablesで制御)。
+#                  パッケージはinfraのミラー(同じネットワーク上なのでFWを通らない)から取る
 # IPアドレスは下の vms の nics を元に、libvirtのDHCPでMACアドレスに固定で払い出す。
 
 libvirt_networks:
@@ -50,17 +51,36 @@ libvirt_networks:
     dhcp_range: [192.168.150.100, 192.168.150.199]
   - name: patch-workload
     bridge: virbr-patchw
-    forward: none
+    forward: nat
+    egress_firewall: true
     address: 192.168.151.1
     netmask: 255.255.255.0
     dhcp_range: [192.168.151.100, 192.168.151.199]
 
-# 下の vms の nics と同じ値にしておく(rsyncの許可先・repoファイル・プロキシ設定に使う)
+# 下の vms の nics と同じ値にしておく(rsyncの許可先・repoファイルに使う)
 repository_ip: 192.168.150.10
 infra_mgmt_ip: 192.168.150.11
 infra_workload_ip: 192.168.151.11
-workload_cidr: 192.168.151.0/24
-proxy_port: 3128
+
+# ---------------------------------------------------------------------------
+# 業務VMの仮想FW(KVMホストのnftables)
+# ---------------------------------------------------------------------------
+# 業務VMが名前解決したときに、libvirtのdnsmasqが下のドメイン(サブドメインを含む)のIPアドレスを
+# nftablesの許可リストに自動で追加する。リストに無い宛先(cdn.redhat.com、家のLANなど)への通信は
+# KVMホストで落とし、カーネルログに "patch-mgmt-fw drop:" として残す。
+workload_egress_firewall_table: patch_mgmt_fw
+workload_egress_allowlist:
+  # TCP 443
+  https:
+    - ssm.ap-northeast-1.amazonaws.com          # SSM Agent
+    - ssmmessages.ap-northeast-1.amazonaws.com  # SSM Agent
+    - ec2messages.ap-northeast-1.amazonaws.com  # SSM Agent
+    - logs.ap-northeast-1.amazonaws.com         # Run Commandの出力
+    - s3.ap-northeast-1.amazonaws.com           # SSM Agent本体、パッチ処理用ファイル(バケットのサブドメインを含む)
+    - subscription.rhsm.redhat.com              # RHSMへの登録(ISOの自動登録)
+  # UDP 123
+  ntp:
+    - rhel.pool.ntp.org                         # chronyの既定の参照先(時刻がずれるとAWS APIの署名が通らない)
 
 # ---------------------------------------------------------------------------
 # リポジトリ同期

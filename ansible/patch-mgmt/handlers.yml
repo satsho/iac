@@ -8,22 +8,7 @@
     name: sshd
     state: reloaded
 
-- name: Restart chronyd
-  ansible.builtin.systemd:
-    name: chronyd
-    state: restarted
-
 - name: Restart rsyncd
   ansible.builtin.systemd:
     name: rsyncd
-    state: restarted
-
-- name: Restart squid
-  ansible.builtin.systemd:
-    name: squid
-    state: restarted
-
-- name: Restart amazon-ssm-agent
-  ansible.builtin.systemd:
-    name: amazon-ssm-agent
     state: restarted

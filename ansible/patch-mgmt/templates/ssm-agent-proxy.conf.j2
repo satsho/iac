@@ -1,7 +1,0 @@
-# {{ ansible_managed }}
-# 業務VMは外に直接出られないので、SSM Agent(とAWS-RunPatchBaseline)はinfraのプロキシを使う。
-# infraのミラー(http)はプロキシを通さずに直接取りに行く。
-[Service]
-Environment="https_proxy=http://{{ infra_workload_ip }}:{{ proxy_port }}"
-Environment="http_proxy=http://{{ infra_workload_ip }}:{{ proxy_port }}"
-Environment="no_proxy={{ infra_workload_ip }},localhost,127.0.0.1"

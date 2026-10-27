@@ -13,7 +13,7 @@ Ansible が SSH で行い、人が入るときも SSH(外出先からは Tailsca
 | 置き場所 | 中身 | 実行方法 |
 |---|---|---|
 | `terraform/environments/patch-mgmt/`(ここ) | AWS側: パッチベースライン・メンテナンスウィンドウ・Runbook・通知・VM用IAMロール | GitHub Actions(`terraform-patch-mgmt.yml`) |
-| [`ansible/patch-mgmt/`](../../../ansible/patch-mgmt/README.md) | 家のサーバ側: libvirtネットワーク・VM(ISOからインストール)・VMの中の設定(リポジトリ同期・プロキシ・SSM登録) | 家のサーバで `ansible-playbook` |
+| [`ansible/patch-mgmt/`](../../../ansible/patch-mgmt/README.md) | 家のサーバ側: libvirtネットワーク・VM(ISOからインストール)・業務VM向けの仮想FW・VMの中の設定(リポジトリ同期・SSM登録) | 家のサーバで `ansible-playbook` |
 
 ## 全体構成
 
@@ -26,17 +26,17 @@ Red Hat CDN (cdn.redhat.com / EUS 10.2)
   │
   │ rsync(873) 毎日01:00
   ▼
-[patch-infra 192.168.150.11 / 192.168.151.11]  httpd(ミラー) + squid(プロキシ) + chrony(NTP)
+[patch-infra 192.168.150.11 / 192.168.151.11]  httpd(ミラー)
   │
   │ http(80) dnf
   ▼
 [patch-test] [patch-stg] [patch-prod]  192.168.151.21〜23
-  外へのルーティング無し。外に出られるのは infra のプロキシ経由で
-  SSM・CloudWatch Logs・S3・RHSM 登録の宛先だけ(cdn.redhat.com は拒否)
+  外に出られるのは、KVMホストの仮想FW(nftables)が許可した
+  SSM・CloudWatch Logs・S3・RHSM 登録・NTP の宛先だけ(cdn.redhat.com は拒否)
 
 家のサーバ(KVMホスト)
   patch-mgmt     192.168.150.0/24 : NAT。repository / infra がインターネットに出る
-  patch-workload 192.168.151.0/24 : 隔離。業務VMと infra の2枚目のNIC
+  patch-workload 192.168.151.0/24 : NAT + 仮想FW。業務VMと infra の2枚目のNIC
 
 Systems Manager(Fleet Manager / Patch Manager / メンテナンスウィンドウ / Automation)
   各VMは Hybrid Activation で mi-xxxxxxxx のマネージドノードとして登録される
@@ -77,32 +77,44 @@ EC2 以外のノードに Session Manager でつなぐには有料の **advanced
 **SSH**(家のサーバを踏み台にする。外出先からは Tailscale で家のサーバに入る)で管理する。
 Patch Manager・Run Command・メンテナンスウィンドウ・Automation は無料の standard tier で使える。
 
-### 3. 業務VMは「外に出られない」+「プロキシで必要な宛先だけ通す」
+### 3. 業務VMは「仮想FW」で必要な宛先だけ外に出す
 
 AWS では VPC エンドポイントで SSM を閉域から使えたが、家のサーバでは SSM の宛先は
-インターネット上にしかない。そこで業務VMは外へのルーティングが無い隔離ネットワークに置き、
-**infra の squid(フォワードプロキシ)が許可した宛先にだけ** 出られるようにしている。
+インターネット上にしかない。そこで業務VMのネットワーク(`patch-workload`)は NAT にしたうえで、
+**KVMホストの nftables を仮想FWにして、許可したドメイン宛ての通信だけを通す**。
 
 | 宛先 | 用途 | 業務VMから |
 |---|---|---|
-| `ssm` / `ssmmessages` / `ec2messages` | SSM Agent | 許可 |
-| `logs` | Run Command 出力 | 許可 |
-| `*.s3.ap-northeast-1.amazonaws.com` | SSM Agent 本体、パッチ処理用ファイル | 許可 |
-| `subscription.rhsm.redhat.com` | RHSM 登録 | 許可 |
-| `cdn.redhat.com` などそれ以外 | — | **拒否**(infra の `/var/log/squid/access.log` に記録が残る) |
+| `ssm` / `ssmmessages` / `ec2messages`(TCP 443) | SSM Agent | 許可 |
+| `logs`(TCP 443) | Run Command 出力 | 許可 |
+| `s3.ap-northeast-1.amazonaws.com` とそのサブドメイン(TCP 443) | SSM Agent 本体、パッチ処理用ファイル | 許可 |
+| `subscription.rhsm.redhat.com`(TCP 443) | RHSM 登録(ISO の自動登録) | 許可 |
+| `rhel.pool.ntp.org`(UDP 123) | 時刻同期(ずれると AWS API の署名が通らない) | 許可 |
+| `cdn.redhat.com`、家の LAN、それ以外すべて | — | **拒否**(KVMホストのカーネルログに `patch-mgmt-fw drop:` が残る) |
 
-パッケージは infra のミラーから直接 http で取る(プロキシは通さない)。業務VMは外の NTP にも
-出られないので、時刻は infra(chrony)に合わせている。時刻がずれると AWS API の署名が通らず、
-SSM が使えなくなるため。
+nftables は IP アドレスでしか判定できないので、ドメインは DNS と組み合わせて扱っている。
+
+```
+業務VM が ssm.ap-northeast-1.amazonaws.com を名前解決
+  → libvirt の dnsmasq(業務VMの DNS サーバ)が答えを返すと同時に、
+    返した IP を nftables の許可リスト(set)に入れる(dnsmasq の nftset 機能)
+  → その IP への TCP 443 だけ、KVMホストを通過できる
+業務VM が cdn.redhat.com を名前解決
+  → 名前は引けるが、許可リストには入らないので通信は KVMホストで落ちる
+```
+
+パッケージは infra のミラー(同じネットワーク上の 192.168.151.11)から直接 http で取るので、
+仮想FWは通らない。許可するドメインは `ansible/patch-mgmt/vars.yml` の `workload_egress_allowlist` で変えられる。
 
 ### 4. サブスクリプションとEUS
 
 KVM 上の VM は PAYG ではないので、5台とも自分の Red Hat アカウントで RHSM に登録する
 (Developer Subscription for Individuals なら16台まで)。
 
-- repository / infra: ISO の自動登録で登録される(外に出られるので)
-- 業務VM: 初回起動時は外に出られず ISO の自動登録が失敗するので、Ansible が infra のプロキシ経由で
-  登録し直す。登録はするが `manage_repos=0` にして、CDN のリポジトリは使わせない
+- 5台とも ISO の自動登録で登録される(業務VMも、仮想FWで `subscription.rhsm.redhat.com` だけは通している)
+- 自動登録が失敗していた場合だけ、Ansible が環境変数の activation key(`RHEL_ORG_ID` / `RHEL_ACTIVATION_KEY`)で
+  登録する。業務VMはキーが無ければ警告だけ出して先に進む(パッチはミラーから当てるので検証は進められる)
+- 業務VMは `manage_repos=0` にして、CDN のリポジトリは使わせない(仮想FWでも CDN には届かない)
 
 **EUS がそのサブスクリプションに含まれているかは未確認**。構築後に repository で確認する:
 
@@ -414,8 +426,15 @@ status ダッシュボードは「直近1時間」で見る前提にしている
 ssh patch-test
 dnf repolist                         # infra-baseos / infra-appstream だけが有効
 dnf updateinfo list --security       # Security アドバイザリが見えればupdateinfoも同期できている
-curl -m 5 -sI --proxy http://192.168.151.11:3128 https://cdn.redhat.com   # 403(プロキシが拒否)
-curl -m 5 -sI https://cdn.redhat.com # 直接は経路が無いので失敗する
+curl -m 5 -sI https://cdn.redhat.com                          # 仮想FWで落ちる(タイムアウト)
+curl -m 5 -s -o /dev/null -w '%{http_code}\n' https://ssm.ap-northeast-1.amazonaws.com   # 許可しているので応答がある
+```
+
+KVMホスト側では、許可リストと落とした通信を確認できる:
+
+```bash
+nft list set inet patch_mgmt_fw https_v4      # 業務VMが名前解決したSSMなどのIP
+journalctl -k | grep 'patch-mgmt-fw drop:'    # 落とした通信(cdn.redhat.com 宛てなど)
 ```
 
 ## コストと後片付け
@@ -433,7 +452,7 @@ SSM のマネージドノードと RHSM の登録も一緒に解除される。
 | サービス | 使いどころ | 優先度 |
 |---|---|---|
 | CloudWatch アラーム | ダッシュボードのメトリクスを使い、「prod の未適用パッチが7日以上0にならない」などを通知する | 中 |
-| Red Hat Insights(console.redhat.com) | RHSM に登録した VM の CVE・推奨対応を一覧できる(サブスクリプションに含まれる)。Patch Manager の CVE は「未適用のパッチがあるもの」だけだが、Insights は「その CVE が影響するか・修正があるか」の観点で見られる。ISO の自動登録で Insights にもつながっていれば repository / infra はそのまま使える(業務VMはプロキシの許可先に Insights の宛先を足す必要がある)。Amazon Inspector はオンプレの VM は対象外とみられる(要確認) | 中 |
+| Red Hat Insights(console.redhat.com) | RHSM に登録した VM の CVE・推奨対応を一覧できる(サブスクリプションに含まれる)。Patch Manager の CVE は「未適用のパッチがあるもの」だけだが、Insights は「その CVE が影響するか・修正があるか」の観点で見られる。ISO の自動登録で Insights にもつながっていれば repository / infra はそのまま使える(業務VMは仮想FWの許可リストに Insights の宛先を足す必要がある)。Amazon Inspector はオンプレの VM は対象外とみられる(要確認) | 中 |
 | AWS Config(`ec2-managedinstance-patch-compliance-status-check`) | パッチ準拠状況の**履歴**を残す。監査で「いつ時点で準拠していたか」を示せる。ハイブリッドのノードも記録できるかは要確認 | 中 |
 | Change Calendar(Systems Manager) | 年末年始などの変更凍結期間を定義し、その間はパッチ適用を止める | 中 |
 | Inventory + Resource Data Sync → Athena | 全VMのパッケージ一覧を S3 に集約し、「この kernel が入っているVM」を SQL で引ける。ダッシュボードを Grafana(家の k3s)や QuickSight で作り込みたくなったときのデータ源にもなる | 低 |

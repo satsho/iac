@@ -479,7 +479,7 @@ Runbook・通知)だけをこの Terraform(別state `patch-mgmt/terraform.tfstat
 `ansible/patch-mgmt/` の playbook を実行して作り、SSH で設定する。パッチの適用状況とCVEは
 CloudWatch ダッシュボード(`iac-poc-patch-status` / `iac-poc-patch-history`)で見る。
 
-設計(ネットワーク・プロキシ・タグ・パッチベースライン・メンテナンスウィンドウ・ゲート・
+設計(ネットワーク・仮想FW・タグ・パッチベースライン・メンテナンスウィンドウ・ゲート・
 再起動パターン・緊急パッチ)と構築手順は
 [`environments/patch-mgmt/README.md`](environments/patch-mgmt/README.md) にまとめている。
 

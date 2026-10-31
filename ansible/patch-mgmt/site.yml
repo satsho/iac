@@ -83,6 +83,7 @@
         file: tasks/kvm-firewall.yml
         apply:
           become: true
+      when: libvirt_networks | selectattr('egress_firewall', 'defined') | selectattr('egress_firewall') | list | length > 0
 
     - name: Define and start the libvirt networks
       ansible.builtin.include_tasks:

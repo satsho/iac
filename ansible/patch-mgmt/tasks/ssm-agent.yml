@@ -15,6 +15,32 @@
         dest: /tmp/amazon-ssm-agent.rpm
         mode: "0644"
 
+    # AWS公式のインストールスクリプト(aws/amazon-ecs-init)と同じ取得元・fingerprintで検証する
+    # https://github.com/aws/amazon-ecs-init/blob/master/scripts/ecs-anywhere-install.sh
+    - name: Download the SSM Agent public key
+      ansible.builtin.get_url:
+        url: https://raw.githubusercontent.com/aws/amazon-ecs-init/master/scripts/amazon-ssm-agent.gpg
+        dest: /tmp/amazon-ssm-agent.gpg
+        mode: "0644"
+
+    - name: Read the fingerprint of the downloaded public key
+      ansible.builtin.command: gpg --quiet --with-colons --with-fingerprint /tmp/amazon-ssm-agent.gpg
+      register: ssm_gpg_fingerprint
+      changed_when: false
+
+    - name: Fail when the public key fingerprint does not match the known value
+      ansible.builtin.assert:
+        that:
+          - "'8108A07A9EBE248E3F1C63F254F4F56E693ECA21' in ssm_gpg_fingerprint.stdout"
+        fail_msg: >-
+          SSM Agentの公開鍵のfingerprintが想定値(8108A07A9EBE248E3F1C63F254F4F56E693ECA21)と
+          異なります。改ざんの可能性があるためインストールを中断します。
+
+    - name: Import the SSM Agent public key into RPM
+      ansible.builtin.command:
+        argv: [rpm, --import, /tmp/amazon-ssm-agent.gpg]
+      changed_when: true
+
     - name: Install the SSM Agent
       ansible.builtin.dnf:
         name: /tmp/amazon-ssm-agent.rpm
@@ -69,10 +95,13 @@
       changed_when: true
       no_log: true
 
-    - name: Remove the downloaded SSM Agent package
+    - name: Remove the downloaded SSM Agent package and public key
       ansible.builtin.file:
-        path: /tmp/amazon-ssm-agent.rpm
+        path: "{{ item }}"
         state: absent
+      loop:
+        - /tmp/amazon-ssm-agent.rpm
+        - /tmp/amazon-ssm-agent.gpg
 
 - name: Start the SSM Agent
   ansible.builtin.systemd:

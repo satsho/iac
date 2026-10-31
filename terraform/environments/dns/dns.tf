@@ -43,24 +43,3 @@ resource "aws_route53_record" "hermes_tailscale" {
   ttl     = 300
   records = [var.tailscale_home_ip]
 }
-
-# ハニーポットは他のサービスと違い、攻撃者に見つけてもらうため本物の
-# インターネットから到達可能にする必要がある(Tailscale限定にできない)。
-# 自宅のISP(NURO)がCGNATでIPv4を複数契約者と共有しており、ルーターの
-# ポート転送が使えないため、自宅のグローバルIPを直接指すのではなく
-# Tailscale Funnel(自宅サーバの既存のtailnet接続をそのまま使って公開する
-# Tailscaleの機能)経由で公開する。公開先はTailscaleが管理するtailnetの
-# FQDNなので、DDNSで追従させるAレコードではなく単純なCNAMEにする。
-# (manifests/ddns-updaterのCronJobはこの用途では使わなくなったため、
-# suspend: true で休止している)
-# ハニーポット本体はmanifests/http-honeypot(自作のHTTPハニーポット)。
-# 当初Cowrie(SSH)で実装していたが、Tailscale Funnelの生TCPモードが
-# TLSハンドシェイクを前提とし非TLSプロトコルを通せないため、Funnelが
-# 自然にサポートするHTTP(S)型に切り替えた。
-resource "aws_route53_record" "honeypot_funnel" {
-  zone_id = aws_route53_zone.main.zone_id
-  name    = "honeypot.${var.domain_name}"
-  type    = "CNAME"
-  ttl     = 300
-  records = ["iac-home.tail478255.ts.net"]
-}

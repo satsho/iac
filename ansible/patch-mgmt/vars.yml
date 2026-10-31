@@ -51,7 +51,9 @@ libvirt_networks:
   - name: patch-workload
     bridge: virbr-patchw
     forward: nat
-    egress_firewall: true
+    # TODO: ホストのdnsmasqがnftset非対応のビルドのため、起動時にエラーになり一時的にfalseにしている。
+    # dnsmasqをnftset対応でビルドし直すか、ipset+iptables-nftに設計変更してtrueに戻すこと。
+    egress_firewall: false
     address: 192.168.151.1
     netmask: 255.255.255.0
     dhcp_range: [192.168.151.100, 192.168.151.199]

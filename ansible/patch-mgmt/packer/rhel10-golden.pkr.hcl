@@ -34,6 +34,13 @@ variable "vm_user" {
   default = "sho"
 }
 
+# RHELのqemu-kvmパッケージは、バイナリをqemu-system-x86_64ではなく
+# /usr/libexec/qemu-kvmに置く(Debian系と違う)。$PATHにも入っていない。
+variable "qemu_binary" {
+  type    = string
+  default = "/usr/libexec/qemu-kvm"
+}
+
 # ISOのキックスタートに設定したパスワード(Gitにコミットしない。
 # `packer build -var "ssh_password=..."` で渡す)
 variable "ssh_password" {
@@ -50,6 +57,7 @@ source "qemu" "rhel10_golden" {
   format     = "qcow2"
 
   accelerator = "kvm"
+  qemu_binary = var.qemu_binary
   memory      = 2048
   cpus        = 2
   # RHEL 10はx86-64-v3(AVX2等)のCPU機能が必須。virt-installの

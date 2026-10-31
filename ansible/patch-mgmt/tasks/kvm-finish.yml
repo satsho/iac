@@ -1,32 +1,17 @@
 ---
-# KVMホスト: インストールが終わったVMにデータディスクを付けて起動する(loop_var: vm)
-- name: Wait until the installation finishes and the VM powers off - {{ vm.name }}
-  ansible.builtin.command: "virsh domstate {{ vm.name }}"
-  register: domstate
-  until: "'shut off' in domstate.stdout"
-  retries: 90
-  delay: 20
-  changed_when: false
+# KVMホスト: クローンしたVM(kvm-install.ymlで--noreboot定義済み、まだ停止中)に
+# データディスクを付けて起動する(loop_var: vm)
+#
+# ゴールデンイメージのクローンなのでOSインストールは発生しておらず、ISOも
+# 使っていない(待つ必要があるのはディスクのアタッチだけ)。
 
-# ISOを付けたままにしておくと、ISOを移動・削除したときにVMが起動できなくなる
-# (ISOにはRed Hatのactivation keyも入っているので、使い終わったら外しておく)
-- name: List the disks of the VM - {{ vm.name }}
-  ansible.builtin.command: "virsh domblklist {{ vm.name }} --details"
-  register: vm_disks
-  changed_when: false
-
-- name: Eject the installer ISO - {{ vm.name }}
-  ansible.builtin.command: "virsh change-media {{ vm.name }} {{ item.split()[2] }} --eject --config"
-  loop: "{{ vm_disks.stdout_lines | select('search', rhel_install_iso | regex_escape ~ '$') | list }}"
-  changed_when: true
-
+# シリアル番号(mirror-data)を付けておくと、VMの中で /dev/disk/by-id/virtio-mirror-data として見える
 - name: Create the mirror data disk - {{ vm.name }}
   ansible.builtin.command:
     argv: [qemu-img, create, -f, qcow2, "{{ libvirt_image_dir }}/{{ vm.name }}-data.qcow2", "{{ vm.data_size_gb }}G"]
     creates: "{{ libvirt_image_dir }}/{{ vm.name }}-data.qcow2"
   when: vm.data_size_gb is defined
 
-# シリアル番号(mirror-data)を付けておくと、VMの中で /dev/disk/by-id/virtio-mirror-data として見える
 - name: Attach the mirror data disk - {{ vm.name }}
   ansible.builtin.command:
     argv:

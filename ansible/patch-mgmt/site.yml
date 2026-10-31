@@ -34,17 +34,19 @@
           - x86_64_v3_flags | difference(cpu_flags.stdout.split()) | length == 0
         fail_msg: "RHEL 10 に必要なCPU機能が足りません: {{ x86_64_v3_flags | difference(cpu_flags.stdout.split()) }}"
 
-    - name: Check that the installer ISO exists
+    - name: Check that the golden image exists
       ansible.builtin.stat:
-        path: "{{ rhel_install_iso }}"
-      register: install_iso
+        path: "{{ golden_image_path }}"
+      register: golden_image
       become: true
 
-    - name: Fail when the installer ISO is missing
+    - name: Fail when the golden image is missing
       ansible.builtin.assert:
         that:
-          - install_iso.stat.exists
-        fail_msg: "{{ rhel_install_iso }} にImage Builderで作ったRHEL 10.2のISOを置いてください"
+          - golden_image.stat.exists
+        fail_msg: >-
+          {{ golden_image_path }} が無いので、先に packer/ でゴールデンイメージを
+          作ってください(ansible/patch-mgmt/packer/README.md参照)。
 
     - name: Check that the SSH public key exists
       ansible.builtin.stat:

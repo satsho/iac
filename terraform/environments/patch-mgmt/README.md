@@ -414,7 +414,9 @@ status ダッシュボードは「直近1時間」で見る前提にしている
 2. GitHub Variables に `PATCH_NOTIFICATION_EMAIL`(通知先メールアドレス、任意)を設定する
 3. `Terraform Patch Management (patch-mgmt)` ワークフローを `plan` → `apply` で実行
 4. SNS から届く確認メールのリンクを踏む
-5. 家のサーバに ISO を置き、VM を作る([`ansible/patch-mgmt/README.md`](../../../ansible/patch-mgmt/README.md))
+5. 家のサーバに ISO を置き、ゴールデンイメージをビルドしてから VM を作る
+   ([`ansible/patch-mgmt/README.md`](../../../ansible/patch-mgmt/README.md)、
+   [`ansible/patch-mgmt/packer/README.md`](../../../ansible/patch-mgmt/packer/README.md))
 6. Fleet Manager に5台(`mi-...`)が表示され、タグが付いていることを確認する
 7. repository の EUS リポジトリと reposync の進み具合を確認する(「前提 4.」「リポジトリ同期の流れ」)
 8. reposync が終わったら infra に同期させる(「リポジトリ同期の流れ」のコマンド)

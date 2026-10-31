@@ -1,0 +1,87 @@
+# RHEL 10.2のゴールデンイメージ(qcow2)を、Image BuilderのISOから1回だけ
+# フルインストールして作る。できたqcow2は site.yml(kvm-install.yml)が
+# backing fileとしてクローンして使う。詳細はREADME.md参照。
+#
+# ホスト名・SSH鍵・SSM登録・ロール別設定はここでは行わない(クローン後に
+# site.ymlがSSH経由で行う)。ここでの目的はただ1つ、「正しくpoweroffされた
+# ベースイメージを作る」こと。
+
+packer {
+  required_plugins {
+    qemu = {
+      version = ">= 1.1.0"
+      source  = "github.com/hashicorp/qemu"
+    }
+  }
+}
+
+variable "iso_path" {
+  type        = string
+  description = "Image BuilderのRHEL 10.2インストーラISOの絶対パス"
+  default     = "/var/lib/libvirt/images/rhel-10.2-patch-mgmt.iso"
+}
+
+variable "output_directory" {
+  type    = string
+  default = "/var/lib/libvirt/images/patch-mgmt"
+}
+
+variable "vm_user" {
+  type    = string
+  default = "sho"
+}
+
+# ISOのキックスタートに設定したパスワード(Gitにコミットしない。
+# `packer build -var "ssh_password=..."` で渡す)
+variable "ssh_password" {
+  type      = string
+  sensitive = true
+}
+
+source "qemu" "rhel10_golden" {
+  iso_url      = "file://${var.iso_path}"
+  iso_checksum = "none" # ローカルファイルなのでチェックサム検証は省略
+
+  disk_image = false
+  disk_size  = "20G"
+  format     = "qcow2"
+
+  accelerator = "kvm"
+  memory      = 2048
+  cpus        = 2
+  # RHEL 10はx86-64-v3(AVX2等)のCPU機能が必須。virt-installの
+  # --cpu host-passthrough と同じ意図で、ホストのCPU機能をそのまま見せる。
+  qemuargs = [
+    ["-cpu", "host"]
+  ]
+
+  net_device     = "virtio-net"
+  disk_interface = "virtio"
+
+  headless = true
+
+  # ISOの起動メニューがそのまま無人インストールへ進む前提(今までの
+  # virt-install --cdromと同じ挙動)。もしメニューで止まる場合は、ここに
+  # 起動メニューの選択キー(例: ["<enter>"])を追加する。
+  boot_wait = "5s"
+
+  output_directory = var.output_directory
+  vm_name           = "rhel10-golden.qcow2"
+
+  ssh_username = var.vm_user
+  ssh_password = var.ssh_password
+  # フルインストール+初回起動を待つ。環境によっては延ばす。
+  ssh_timeout = "45m"
+
+  # ISOは自動でRHSMに登録される仕様なので、ゴールデンイメージのまま電源を切ると
+  # クローンした5台が全部同じ登録情報を複製してしまう。ここで登録解除しておき、
+  # 各VM側の既存のタスク(rhsm-mirror.yml/rhsm-workload.yml、「登録済みか確認し、
+  # 未登録ならactivation keyで登録する」)が、クローン後にそれぞれ別の登録を
+  # 行えるようにする。
+  shutdown_command = "sudo subscription-manager unregister; sudo poweroff"
+  shutdown_timeout = "5m"
+}
+
+build {
+  sources = ["source.qemu.rhel10_golden"]
+}

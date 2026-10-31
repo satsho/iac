@@ -21,14 +21,24 @@ variable "iso_path" {
   default     = "/var/lib/libvirt/images/rhel-10.2-patch-mgmt.iso"
 }
 
+# Packerの仕様で「まだ存在しないディレクトリ」である必要があるため、
+# 5台のVMのディスクを置く libvirt_image_dir(vars.ymlの値、
+# /var/lib/libvirt/images/patch-mgmt)とは別のディレクトリにする。
 variable "output_directory" {
   type    = string
-  default = "/var/lib/libvirt/images/patch-mgmt"
+  default = "/var/lib/libvirt/images/patch-mgmt-golden-build"
 }
 
 variable "vm_user" {
   type    = string
   default = "sho"
+}
+
+# RHELのqemu-kvmパッケージは、バイナリをqemu-system-x86_64ではなく
+# /usr/libexec/qemu-kvmに置く(Debian系と違う)。$PATHにも入っていない。
+variable "qemu_binary" {
+  type    = string
+  default = "/usr/libexec/qemu-kvm"
 }
 
 # ISOのキックスタートに設定したパスワード(Gitにコミットしない。
@@ -47,6 +57,7 @@ source "qemu" "rhel10_golden" {
   format     = "qcow2"
 
   accelerator = "kvm"
+  qemu_binary = var.qemu_binary
   memory      = 2048
   cpus        = 2
   # RHEL 10はx86-64-v3(AVX2等)のCPU機能が必須。virt-installの

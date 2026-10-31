@@ -6,32 +6,39 @@ SSH で設定する playbook。設計(ネットワーク・仮想FW・パッチ�
 
 | ファイル | 内容 |
 |---|---|
+| [`packer/`](packer/README.md) | Image BuilderのISOから、ゴールデンイメージ(qcow2)を**1回だけ**ビルドする(Packer) |
 | `vars.yml` | VM・ネットワーク・タグ・リポジトリ同期の設定(ここを編集する) |
 | `site.yml` | VMを作り(まだ無いものだけ)、SSHで全VMの設定を揃える。何度流してもよい |
 | `destroy.yml` | VMを消し、SSMのマネージドノードとRHSMの登録を解除する |
-| `tasks/kvm-*.yml` | KVMホスト側(ネットワーク、ISOからのインストール) |
+| `tasks/kvm-*.yml` | KVMホスト側(ネットワーク、ゴールデンイメージのクローン) |
 | `tasks/*.yml`(それ以外) | VMの中(SSH・SSM Agent・RHSM・役割ごとの設定) |
 | `templates/` | 仮想FW(nftables)と、VMに置く設定ファイル(reposync・rsync・repoファイルなど) |
 
 ## 流れ
+
+VM作成は2段階になっている。**フルのOSインストールはゴールデンイメージを作る時の
+1回だけ**で、5台はそれをクローンするだけなので速く、Anacondaのインストーラ絡みの
+不具合(「インストールが終わって停止するのを待つ」で止まる等)に当たるリスクも
+1回分に減る。
+
+0. **(初回・1回だけ)** [`packer/`](packer/README.md) でゴールデンイメージをビルドする
 
 `site.yml` は3つのplayに分かれている。
 
 1. **KVMホスト**(ローカル実行)
    - 業務VMのネットワーク向けの仮想FW(nftables。許可ドメインだけ外に出す)を用意する
    - libvirtのネットワーク2つを作る(VMのIPはMACアドレスでDHCP固定)
-   - まだ無いVMを、Image BuilderのISOから全台同時に無人インストールする
-   - インストールが終わって停止したVMから、ミラー用データディスクを付けて起動する
-     (ISOは最初のディスクを無条件にフォーマットするので、データディスクはインストール後に付ける)
+   - まだ無いVMを、ゴールデンイメージをクローンして作る(フルインストールはしない)
+   - 停止状態のVMに、ミラー用データディスクを付けてから起動する
 2. **repository / infra**(SSH)
    - SSH鍵の登録、パスワードでのSSHログインの停止、ホスト名・タイムゾーン
    - SSM Agentのインストールと登録(VMごとに使い捨てのアクティベーションを作る)、タグの同期
-   - ISOの自動登録が済んでいるか確認し、リリースを10.2に固定してEUSリポジトリだけを有効にする
+   - RHSMに登録(ゴールデンイメージは未登録なのでactivation keyが必須)し、リリースを10.2に固定してEUSリポジトリだけを有効にする
    - ミラー用データディスクのマウント、役割ごとの設定(reposync / rsync / httpd)
 3. **test / stg / prod**(SSH)
    - リポジトリをinfraのミラーに向ける
    - SSM Agentのインストールと登録、タグの同期(仮想FWで許可したSSMの宛先に直接出る)
-   - ISOの自動登録が済んでいるか確認する(済んでいなければ activation key があれば登録、無ければ警告)
+   - RHSMに登録する(ゴールデンイメージは未登録なので、activation keyがあれば登録、無ければ警告)
 
 例: `patch-test` の場合、`vars.yml` の `Env=test, PatchGroup=rhel10-test, RebootPolicy=auto` が
 マネージドノード(`mi-0abc...`)のタグになり、Terraform 側のメンテナンスウィンドウ
@@ -48,18 +55,20 @@ SSH で設定する playbook。設計(ネットワーク・仮想FW・パッチ�
 - メモリ: 4GB × 2(repository / infra)+ 2GB × 3 = 14GB
 - ディスク: ルート 20GB × 5 と、ミラー用データディスク 150GB × 2(使った分だけ増える qcow2)。
   repository と infra に同じリポジトリが1式ずつ入るので、実際の使用量は「同期したリポジトリのサイズ × 2」+ α
-- `vars.yml` の `rhel_install_iso` に、Image Builder で作った RHEL 10.2 のISOを置く
-  (Red Hat への自動登録あり、ユーザー `sho`(wheel))
+- Image Builder で作った RHEL 10.2 のISO(Red Hat への自動登録あり、ユーザー `sho`(wheel))。
+  これは `vars.yml` ではなく、[`packer/`](packer/README.md) でゴールデンイメージを
+  ビルドする時にだけ使う(ISO自体はPackerの変数で渡す)
 - `osinfo-query os | grep rhel10` で `os_variant` の値が使えることを確認する(古い osinfo-db だと
   `rhel10.0` が無いので、その場合はホストの osinfo-db を更新するか一番近い値にする)
 - playbook を実行するユーザーの SSH 鍵(`vars.yml` の `ssh_public_key_file`)
+- `packer`(ゴールデンイメージのビルドに使う。[`packer/README.md`](packer/README.md)参照)
 
 先に Terraform 側を apply しておく(VM が引き受ける IAM ロール `iac-poc-patch-hybrid-node-role` が要る)。
 
 ## ISOの置き場所
 
 家のサーバ(KVMホスト)の **`/var/lib/libvirt/images/rhel-10.2-patch-mgmt.iso`** に置く
-(`vars.yml` の `rhel_install_iso`)。
+([`packer/README.md`](packer/README.md)で指定するパス)。
 
 VM を動かすプロセス(qemu)が読めて、SELinux のラベル(`virt_image_t`)も最初から合っている場所なので、
 ここに置くのが一番トラブルが少ない。ホームディレクトリなどに置くと、qemu から読めなかったり
@@ -86,9 +95,11 @@ rm /tmp/<ダウンロードしたISO>.iso
 # SSMのアクティベーションを作れるAWSの認証情報(ssm:CreateActivation、ssm:AddTagsToResource、
 # iac-poc-patch-hybrid-node-role への iam:PassRole が要る)
 export AWS_PROFILE=<管理者のプロファイル>
-# (任意)ISOの自動登録が失敗していたときだけ使う。無くても進む(業務VMは警告だけ出す)
-# export RHEL_ORG_ID='<Org ID>'
-# export RHEL_ACTIVATION_KEY='<activation key の名前>'
+# ゴールデンイメージは未登録の状態なので、repository/infraの新規作成には必須
+# (無いとRHSM登録のタスクで失敗する)。業務VM(test/stg/prod)は無くても進める
+# (警告だけ出し、ミラーからのパッチ適用自体はRHSM登録無しでもできる)
+export RHEL_ORG_ID='<Org ID>'
+export RHEL_ACTIVATION_KEY='<activation key の名前>'
 
 cd ansible/patch-mgmt
 ansible-playbook -k -K site.yml   # 初回: -k でVMのSSHパスワード、-K でsudoのパスワードを聞かれる
@@ -162,7 +173,7 @@ playbook を使わずに VM を消すと、RHSM のシステムと SSM の `mi-.
 | 症状 | 見るところ |
 |---|---|
 | ネットワークの起動で `dnsmasq: failed to bind DHCP server socket: Address already in use` | KVMホストの別のプロセスが DHCP のポート(UDP 67)を使っている。`ss -ulpn \| grep -E ':67\s'` で確認し、家の dnsmasq なら `bind-interfaces` と `interface=<LAN側のNIC>` で待ち受けを絞る(使っていなければ止める) |
-| 「インストールが終わって停止するのを待つ」で止まる | VNC でインストーラの画面を見る。ISO のキックスタートに `reboot` / `poweroff` が無いと、最後に Enter 待ちで止まる |
+| ゴールデンイメージのビルド(`packer build`)でインストールが終わらず止まる | [`packer/README.md`](packer/README.md)の「前提」を参照。ISO のキックスタートに `reboot` / `poweroff` が無いと、最後に Enter 待ちで止まる |
 | SSH がつながらない | `virsh domifaddr <VM名>` / `virsh net-dhcp-leases patch-mgmt` でIPが払い出されているか |
 | repository で EUS のリポジトリを有効にできない | サブスクリプションに EUS が無い可能性(Terraform 側 README の「前提 4.」) |
 | 業務VMの SSM 登録・RHSM 登録が失敗する | KVMホストで `journalctl -k \| grep 'patch-mgmt-fw drop:'`(必要な宛先を落としていないか)と `nft list set inet patch_mgmt_fw https_v4`(許可リストに IP が入っているか) |

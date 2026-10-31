@@ -1,22 +1,50 @@
 ---
-# KVMホスト: ISOからのインストールを開始する(loop_var: vm)。
-# インストーラはルートディスクだけを付けて起動する。Image BuilderのISOは「最初のディスク」を
-# 無条件にフォーマットするので、ミラー用データディスクはインストールが終わってから付ける
-# (kvm-finish.yml)。
+# KVMホスト: ゴールデンイメージ(packer/rhel10-golden.pkr.hcl で作成済み)をクローンして
+# VMを作る(loop_var: vm)。フルのOSインストールはゴールデンイメージを作るときの
+# 1回だけで済み、ここでは「ディスクをコピーして定義するだけ」なので速い。
+#
+# ミラー用データディスクは、ゴールデンイメージには含めず、ここでは付けない
+# (kvm-finish.ymlで、VMを停止状態のまま付ける)。
+- name: Check that the golden image exists
+  ansible.builtin.stat:
+    path: "{{ golden_image_path }}"
+  register: golden_image
+
+- name: Fail when the golden image is missing
+  ansible.builtin.assert:
+    that:
+      - golden_image.stat.exists
+    fail_msg: >-
+      {{ golden_image_path }} が無いので、先に ansible/patch-mgmt/packer で
+      `packer build rhel10-golden.pkr.hcl` を実行してゴールデンイメージを作ってください
+      (ansible/patch-mgmt/packer/README.md参照)。
+
 - name: Create the VM directory - {{ vm.name }}
   ansible.builtin.file:
     path: "{{ libvirt_image_dir }}/{{ vm.name }}"
     state: directory
     mode: "0700"
 
-- name: Create the root disk - {{ vm.name }}
+# -b でゴールデンイメージをbacking fileとして指定するクローン(copy-on-write)。
+# 実際にディスクを使う分だけ増えるので、一瞬で終わり、ディスクの消費も最小限。
+- name: Clone the golden image for the root disk - {{ vm.name }}
   ansible.builtin.command:
-    argv: [qemu-img, create, -f, qcow2, "{{ libvirt_image_dir }}/{{ vm.name }}/root.qcow2", "{{ root_disk_size_gb }}G"]
+    argv:
+      - qemu-img
+      - create
+      - -f
+      - qcow2
+      - -F
+      - qcow2
+      - -b
+      - "{{ golden_image_path }}"
+      - "{{ libvirt_image_dir }}/{{ vm.name }}/root.qcow2"
     creates: "{{ libvirt_image_dir }}/{{ vm.name }}/root.qcow2"
 
-# --noautoconsole なので、インストールの完了を待たずに戻る。インストールが終わると
-# VMは停止した状態になるので、kvm-finish.yml で停止を待ってから起動し直す。
-- name: Start the unattended installation from the ISO - {{ vm.name }}
+# --import なのでOSインストールは発生しない(既にインストール済みのディスクを
+# そのまま使う)。--noreboot で起動はせず定義だけ行い、kvm-finish.yml で
+# データディスクを付けたうえで起動する。
+- name: Define the VM from the cloned disk - {{ vm.name }}
   ansible.builtin.command:
     cmd: >-
       virt-install
@@ -25,7 +53,8 @@
       --vcpus {{ vm.vcpus }}
       --cpu host-passthrough
       --os-variant {{ os_variant }}
-      --cdrom {{ rhel_install_iso }}
+      --import
+      --noreboot
       --disk path={{ libvirt_image_dir }}/{{ vm.name }}/root.qcow2,bus=virtio
       {% for nic in vm.nics %}--network network={{ nic.network }},mac={{ nic.mac }},model=virtio {% endfor %}
       --graphics vnc,listen=127.0.0.1

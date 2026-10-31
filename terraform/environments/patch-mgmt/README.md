@@ -111,9 +111,11 @@ nftables は IP アドレスでしか判定できないので、ドメインは 
 5台とも、自分の Red Hat アカウントのサブスクリプションで RHSM に登録する
 (Developer Subscription for Individuals なら16台まで)。
 
-- 5台とも ISO の自動登録で登録される(業務VMも、仮想FWで `subscription.rhsm.redhat.com` だけは通している)
-- 自動登録が失敗していた場合だけ、Ansible が環境変数の activation key(`RHEL_ORG_ID` / `RHEL_ACTIVATION_KEY`)で
-  登録する。業務VMはキーが無ければ警告だけ出して先に進む(パッチはミラーから当てるので検証は進められる)
+- ゴールデンイメージ(`ansible/patch-mgmt/packer/`)は未登録の状態にしてあるので、5台とも
+  クローン後にAnsibleが環境変数の activation key(`RHEL_ORG_ID` / `RHEL_ACTIVATION_KEY`)で登録する
+  (業務VMも、仮想FWで `subscription.rhsm.redhat.com` だけは通している)
+- repository/infraはキーが無いと登録タスクで失敗する(必須)。業務VMはキーが無ければ警告だけ出して
+  先に進む(パッチはミラーから当てるので検証は進められる)
 - 業務VMは `manage_repos=0` にして、CDN のリポジトリは使わせない(仮想FWでも CDN には届かない)
 
 **EUS がそのサブスクリプションに含まれているかは未確認**。構築後に repository で確認する:
@@ -414,7 +416,9 @@ status ダッシュボードは「直近1時間」で見る前提にしている
 2. GitHub Variables に `PATCH_NOTIFICATION_EMAIL`(通知先メールアドレス、任意)を設定する
 3. `Terraform Patch Management (patch-mgmt)` ワークフローを `plan` → `apply` で実行
 4. SNS から届く確認メールのリンクを踏む
-5. 家のサーバに ISO を置き、VM を作る([`ansible/patch-mgmt/README.md`](../../../ansible/patch-mgmt/README.md))
+5. 家のサーバに ISO を置き、ゴールデンイメージをビルドしてから VM を作る
+   ([`ansible/patch-mgmt/README.md`](../../../ansible/patch-mgmt/README.md)、
+   [`ansible/patch-mgmt/packer/README.md`](../../../ansible/patch-mgmt/packer/README.md))
 6. Fleet Manager に5台(`mi-...`)が表示され、タグが付いていることを確認する
 7. repository の EUS リポジトリと reposync の進み具合を確認する(「前提 4.」「リポジトリ同期の流れ」)
 8. reposync が終わったら infra に同期させる(「リポジトリ同期の流れ」のコマンド)

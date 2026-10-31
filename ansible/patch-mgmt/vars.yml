@@ -13,12 +13,11 @@ ssm_hybrid_role: iac-poc-patch-hybrid-node-role
 
 # VMのディスクを置く場所
 libvirt_image_dir: /var/lib/libvirt/images/patch-mgmt
-# RHEL Image Builderで作ったインストーラISO(RHEL 10.2、Red Hatへの自動登録あり、ユーザーsho)。
-# 無人インストールで「最初のディスク」をフォーマットする。
-rhel_install_iso: /var/lib/libvirt/images/rhel-10.2-patch-mgmt.iso
+# packer/rhel10-golden.pkr.hcl で1回だけビルドするゴールデンイメージ。
+# 各VMのディスクはこれをbacking fileとしてクローンする(packer/README.md参照)。
+golden_image_path: "{{ libvirt_image_dir }}/rhel10-golden.qcow2"
 # virt-install --os-variant に渡す値(osinfo-query os | grep rhel10 で確認)
 os_variant: rhel10.0
-root_disk_size_gb: 20
 
 # ---------------------------------------------------------------------------
 # VMへのSSH

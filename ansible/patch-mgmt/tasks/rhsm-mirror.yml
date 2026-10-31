@@ -1,15 +1,14 @@
 ---
 # repository / infra: RHSMへの登録を確認し、リリースをEUS 10.2に固定してミラー対象のリポジトリだけを有効にする
-- name: Wait for the automatic registration configured in the ISO
+- name: Check whether RHSM is already registered
   ansible.builtin.command: subscription-manager identity
   register: rhsm_identity
-  until: rhsm_identity.rc == 0
-  retries: 20
-  delay: 30
   changed_when: false
   failed_when: false
 
-# ISOの自動登録が失敗していた場合だけ、環境変数のactivation keyで登録する
+# ゴールデンイメージはPacker側でunregisterしてあるので、クローンした直後は
+# 必ず未登録の状態になる。ISOの自動登録を待つ必要は無い(Anacondaの%postで
+# 一度きり実行されるものなので、クローン後の起動では二度と走らない)。
 - name: Register with Red Hat Subscription Management
   when: rhsm_identity.rc != 0
   block:

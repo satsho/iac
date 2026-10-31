@@ -51,9 +51,6 @@ resource "aws_iam_role_policy" "ssm_hybrid_activation_route53" {
         Action = [
           "route53:ListHostedZonesByName",
           "route53:GetChange",
-          # DDNS CronJob(manifests/ddns-updater)が、更新前に現在のレコード値を
-          # 読んで変化の有無を比較するために必要。
-          "route53:ListResourceRecordSets",
         ]
         Resource = "*"
       },

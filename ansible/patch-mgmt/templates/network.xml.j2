@@ -5,6 +5,9 @@
 <network>
 {% endif %}
   <name>{{ net.name }}</name>
+{% if existing_uuid | default('') | length > 0 %}
+  <uuid>{{ existing_uuid }}</uuid>
+{% endif %}
 {% if net.forward == 'nat' %}
   <forward mode='nat'/>
 {% endif %}

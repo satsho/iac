@@ -33,12 +33,12 @@ VM作成は2段階になっている。**フルのOSインストールはゴー�
 2. **repository / infra**(SSH)
    - SSH鍵の登録、パスワードでのSSHログインの停止、ホスト名・タイムゾーン
    - SSM Agentのインストールと登録(VMごとに使い捨てのアクティベーションを作る)、タグの同期
-   - ISOの自動登録が済んでいるか確認し、リリースを10.2に固定してEUSリポジトリだけを有効にする
+   - RHSMに登録(ゴールデンイメージは未登録なのでactivation keyが必須)し、リリースを10.2に固定してEUSリポジトリだけを有効にする
    - ミラー用データディスクのマウント、役割ごとの設定(reposync / rsync / httpd)
 3. **test / stg / prod**(SSH)
    - リポジトリをinfraのミラーに向ける
    - SSM Agentのインストールと登録、タグの同期(仮想FWで許可したSSMの宛先に直接出る)
-   - ISOの自動登録が済んでいるか確認する(済んでいなければ activation key があれば登録、無ければ警告)
+   - RHSMに登録する(ゴールデンイメージは未登録なので、activation keyがあれば登録、無ければ警告)
 
 例: `patch-test` の場合、`vars.yml` の `Env=test, PatchGroup=rhel10-test, RebootPolicy=auto` が
 マネージドノード(`mi-0abc...`)のタグになり、Terraform 側のメンテナンスウィンドウ
@@ -95,9 +95,11 @@ rm /tmp/<ダウンロードしたISO>.iso
 # SSMのアクティベーションを作れるAWSの認証情報(ssm:CreateActivation、ssm:AddTagsToResource、
 # iac-poc-patch-hybrid-node-role への iam:PassRole が要る)
 export AWS_PROFILE=<管理者のプロファイル>
-# (任意)ISOの自動登録が失敗していたときだけ使う。無くても進む(業務VMは警告だけ出す)
-# export RHEL_ORG_ID='<Org ID>'
-# export RHEL_ACTIVATION_KEY='<activation key の名前>'
+# ゴールデンイメージは未登録の状態なので、repository/infraの新規作成には必須
+# (無いとRHSM登録のタスクで失敗する)。業務VM(test/stg/prod)は無くても進める
+# (警告だけ出し、ミラーからのパッチ適用自体はRHSM登録無しでもできる)
+export RHEL_ORG_ID='<Org ID>'
+export RHEL_ACTIVATION_KEY='<activation key の名前>'
 
 cd ansible/patch-mgmt
 ansible-playbook -k -K site.yml   # 初回: -k でVMのSSHパスワード、-K でsudoのパスワードを聞かれる

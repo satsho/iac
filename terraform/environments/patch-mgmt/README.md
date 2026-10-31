@@ -111,9 +111,11 @@ nftables は IP アドレスでしか判定できないので、ドメインは 
 5台とも、自分の Red Hat アカウントのサブスクリプションで RHSM に登録する
 (Developer Subscription for Individuals なら16台まで)。
 
-- 5台とも ISO の自動登録で登録される(業務VMも、仮想FWで `subscription.rhsm.redhat.com` だけは通している)
-- 自動登録が失敗していた場合だけ、Ansible が環境変数の activation key(`RHEL_ORG_ID` / `RHEL_ACTIVATION_KEY`)で
-  登録する。業務VMはキーが無ければ警告だけ出して先に進む(パッチはミラーから当てるので検証は進められる)
+- ゴールデンイメージ(`ansible/patch-mgmt/packer/`)は未登録の状態にしてあるので、5台とも
+  クローン後にAnsibleが環境変数の activation key(`RHEL_ORG_ID` / `RHEL_ACTIVATION_KEY`)で登録する
+  (業務VMも、仮想FWで `subscription.rhsm.redhat.com` だけは通している)
+- repository/infraはキーが無いと登録タスクで失敗する(必須)。業務VMはキーが無ければ警告だけ出して
+  先に進む(パッチはミラーから当てるので検証は進められる)
 - 業務VMは `manage_repos=0` にして、CDN のリポジトリは使わせない(仮想FWでも CDN には届かない)
 
 **EUS がそのサブスクリプションに含まれているかは未確認**。構築後に repository で確認する:

@@ -19,11 +19,14 @@
       `packer build rhel10-golden.pkr.hcl` を実行してゴールデンイメージを作ってください
       (ansible/patch-mgmt/packer/README.md参照)。
 
+# 0700だとQEMU(root以外のuid、通常qemu)がディレクトリをトラバースできず
+# ディスクファイル自体は644で読めるのに "Permission denied" で起動に失敗する。
+# 711(一覧表示はさせないが、ファイル名を知っていればアクセスは許可)にする。
 - name: Create the VM directory - {{ vm.name }}
   ansible.builtin.file:
     path: "{{ libvirt_image_dir }}/{{ vm.name }}"
     state: directory
-    mode: "0700"
+    mode: "0711"
 
 # -b でゴールデンイメージをbacking fileとして指定するクローン(copy-on-write)。
 # 実際にディスクを使う分だけ増えるので、一瞬で終わり、ディスクの消費も最小限。

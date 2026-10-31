@@ -21,9 +21,12 @@ variable "iso_path" {
   default     = "/var/lib/libvirt/images/rhel-10.2-patch-mgmt.iso"
 }
 
+# Packerの仕様で「まだ存在しないディレクトリ」である必要があるため、
+# 5台のVMのディスクを置く libvirt_image_dir(vars.ymlの値、
+# /var/lib/libvirt/images/patch-mgmt)とは別のディレクトリにする。
 variable "output_directory" {
   type    = string
-  default = "/var/lib/libvirt/images/patch-mgmt"
+  default = "/var/lib/libvirt/images/patch-mgmt-golden-build"
 }
 
 variable "vm_user" {

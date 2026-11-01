@@ -44,6 +44,44 @@
       - "{{ libvirt_image_dir }}/{{ vm.name }}/root.qcow2"
     creates: "{{ libvirt_image_dir }}/{{ vm.name }}/root.qcow2"
 
+# DHCPを使わない設計(vars.yml参照)なので、起動前にNetworkManagerの接続定義を
+# 直接ディスクへ書き込んでおく。MACアドレスで紐付けるので、クローン先のVMで
+# インターフェース名がens3/enp1s0のどちらになっても問題ない。
+- name: Render the static network config for each NIC - {{ vm.name }}
+  ansible.builtin.template:
+    src: static-nic.nmconnection.j2
+    dest: "/tmp/{{ vm.name }}-{{ nic.network }}.nmconnection"
+    mode: "0600"
+  loop: "{{ vm.nics }}"
+  loop_control:
+    loop_var: nic
+    label: "{{ nic.network }}"
+  vars:
+    net: "{{ libvirt_networks | selectattr('name', 'equalto', nic.network) | first }}"
+    is_primary: "{{ nic == vm.nics[0] }}"
+
+# クローンしたディスクへ、ゲストを起動せずに直接ファイルを書き込む(libguestfs)。
+- name: Inject the static network config into the cloned disk - {{ vm.name }}
+  ansible.builtin.command:
+    cmd: >-
+      virt-customize -a {{ libvirt_image_dir }}/{{ vm.name }}/root.qcow2
+      --run-command 'rm -f /etc/NetworkManager/system-connections/*'
+      {% for nic in vm.nics %}
+      --upload /tmp/{{ vm.name }}-{{ nic.network }}.nmconnection:/etc/NetworkManager/system-connections/{{ nic.network }}.nmconnection
+      {% endfor %}
+      --run-command 'chmod 600 /etc/NetworkManager/system-connections/*.nmconnection'
+      --selinux-relabel
+  changed_when: true
+
+- name: Remove the rendered network config files - {{ vm.name }}
+  ansible.builtin.file:
+    path: "/tmp/{{ vm.name }}-{{ nic.network }}.nmconnection"
+    state: absent
+  loop: "{{ vm.nics }}"
+  loop_control:
+    loop_var: nic
+    label: "{{ nic.network }}"
+
 # --import なのでOSインストールは発生しない(既にインストール済みのディスクを
 # そのまま使う)。--noreboot で起動はせず定義だけ行い、kvm-finish.yml で
 # データディスクを付けたうえで起動する。

@@ -27,7 +27,9 @@ VM作成は2段階になっている。**フルのOSインストールはゴー�
 
 1. **KVMホスト**(ローカル実行)
    - 業務VMのネットワーク向けの仮想FW(nftables。許可ドメインだけ外に出す)を用意する
-   - libvirtのネットワーク2つを作る(VMのIPはMACアドレスでDHCP固定)
+   - libvirtのネットワーク2つを作る(DHCPは使わない。VMのIPはクローン直後・起動前に
+     ディスクへ直接書き込む固定IP。dnsmasq 2.90のbind-dynamicのバグで、ホストのLAN側
+     DHCPサーバーとポート67を取り合うため)
    - まだ無いVMを、ゴールデンイメージをクローンして作る(フルインストールはしない)
    - 停止状態のVMに、ミラー用データディスクを付けてから起動する
 2. **repository / infra**(SSH)
@@ -172,9 +174,8 @@ playbook を使わずに VM を消すと、RHSM のシステムと SSM の `mi-.
 
 | 症状 | 見るところ |
 |---|---|
-| ネットワークの起動で `dnsmasq: failed to bind DHCP server socket: Address already in use` | KVMホストの別のプロセスが DHCP のポート(UDP 67)を使っている。`ss -ulpn \| grep -E ':67\s'` で確認し、家の dnsmasq なら `bind-interfaces` と `interface=<LAN側のNIC>` で待ち受けを絞る(使っていなければ止める) |
 | ゴールデンイメージのビルド(`packer build`)でインストールが終わらず止まる | [`packer/README.md`](packer/README.md)の「前提」を参照。ISO のキックスタートに `reboot` / `poweroff` が無いと、最後に Enter 待ちで止まる |
-| SSH がつながらない | `virsh domifaddr <VM名>` / `virsh net-dhcp-leases patch-mgmt` でIPが払い出されているか |
+| SSH がつながらない | `virsh domifaddr <VM名>` で固定IPが見えているか。無ければ `virt-customize`での静的IP書き込み(kvm-install.yml)がVM起動前に済んでいるか確認 |
 | repository で EUS のリポジトリを有効にできない | サブスクリプションに EUS が無い可能性(Terraform 側 README の「前提 4.」) |
 | 業務VMの SSM 登録・RHSM 登録が失敗する | KVMホストで `journalctl -k \| grep 'patch-mgmt-fw drop:'`(必要な宛先を落としていないか)と `nft list set inet patch_mgmt_fw https_v4`(許可リストに IP が入っているか) |
 | 許可リストが空のまま増えない | dnsmasq が SELinux に止められていないか(`ausearch -m avc -ts recent -c dnsmasq`)。playbook は `dnsmasq_use_ipset` を有効にしている |

@@ -8,22 +8,24 @@
   <forward mode='nat'/>
 {% endif %}
   <bridge name='{{ net.bridge }}' stp='on' delay='0'/>
-  <ip address='{{ net.address }}' netmask='{{ net.netmask }}'>
-    <dhcp>
-      <range start='{{ net.dhcp_range[0] }}' end='{{ net.dhcp_range[1] }}'/>
-      <!-- VMのIPはMACアドレスで固定する(ISOからのインストールなのでVM側では固定しない) -->
+  <!-- DHCPは配らない(VM側は固定IP。kvm-install.ymlがクローン直後・起動前に書き込む)。
+       名前解決だけ、このネットワークのdnsmasqで行う。 -->
+  <dns>
 {% for vm in vms %}
 {% for nic in vm.nics if nic.network == net.name %}
-      <host mac='{{ nic.mac }}' name='{{ vm.name }}' ip='{{ nic.address }}'/>
+    <host ip='{{ nic.address }}'>
+      <hostname>{{ vm.name }}</hostname>
+    </host>
 {% endfor %}
 {% endfor %}
-    </dhcp>
+  </dns>
+  <ip address='{{ net.address }}' netmask='{{ net.netmask }}'>
   </ip>
   <dnsmasq:options>
     <!-- dnsmasq 2.90のbind-dynamicのバグ対策: 本来このネットワークのブリッジだけに
-         バインドすべきところ、ホストの全インターフェースを掴んでしまうことがあり、
-         ホストのLAN側DHCP(kea-dhcp4)とポート67を取り合って起動に失敗する。
-         LAN側インターフェースを明示的に除外する。 -->
+         バインドすべきところ、ホストの全インターフェースを掴んでしまうことがある。
+         DHCPを使わなくした今も、DNS(53番)で同じ理由により巻き込まれる可能性があるため、
+         念のためLAN側インターフェースを明示的に除外しておく。 -->
     <dnsmasq:option value='except-interface={{ host_lan_interface }}'/>
 {% if net.egress_firewall | default(false) %}
     <!-- 仮想FW: 許可ドメインを名前解決した結果のIPを、KVMホストのnftablesの許可リスト(set)に入れる -->

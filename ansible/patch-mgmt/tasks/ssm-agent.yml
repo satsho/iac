@@ -48,7 +48,9 @@
       register: crypto_policy_before
       changed_when: false
 
-    - name: Import the SSM Agent public key into RPM
+    # dnfはパッケージインストール時にも鍵の自己署名を(インポート時と同じく)再検証するため、
+    # ポリシーを戻す前にインポートとインストールの両方を終わらせる。
+    - name: Import the public key and install the SSM Agent
       block:
         # RHEL 10には`DEFAULT:SHA1`サブポリシーモジュールが無い(RHEL 9にはあった)。
         # SHA1を許可する最も近いベースポリシーはLEGACY。
@@ -60,16 +62,16 @@
           ansible.builtin.command:
             argv: [rpm, --import, /tmp/amazon-ssm-agent.gpg]
           changed_when: true
+
+        - name: Install the SSM Agent
+          ansible.builtin.dnf:
+            name: /tmp/amazon-ssm-agent.rpm
+            disablerepo: "*"
+            state: present
       always:
         - name: Restore the system-wide crypto policy
           ansible.builtin.command: "update-crypto-policies --set {{ crypto_policy_before.stdout | trim }}"
           changed_when: true
-
-    - name: Install the SSM Agent
-      ansible.builtin.dnf:
-        name: /tmp/amazon-ssm-agent.rpm
-        disablerepo: "*"
-        state: present
 
     # VMごとに使い捨てのアクティベーション(登録1回限り、既定で24時間で失効)を作る。
     # AWS CLIはplaybookを実行したユーザーの認証情報で動かす(KVMホストのrootの認証情報は使わない)。

@@ -50,8 +50,10 @@
 
     - name: Import the SSM Agent public key into RPM
       block:
+        # RHEL 10には`DEFAULT:SHA1`サブポリシーモジュールが無い(RHEL 9にはあった)。
+        # SHA1を許可する最も近いベースポリシーはLEGACY。
         - name: Temporarily allow SHA1 to import the SSM Agent public key
-          ansible.builtin.command: update-crypto-policies --set DEFAULT:SHA1
+          ansible.builtin.command: update-crypto-policies --set LEGACY
           changed_when: true
 
         - name: Import the public key

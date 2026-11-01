@@ -1,16 +1,17 @@
 ---
-# 業務VM: RHSMへの登録はISOの自動登録に任せる(仮想FWで subscription.rhsm.redhat.com だけは通している)。
-# subscription-managerにはrepoファイルを管理させず、CDNのリポジトリは使わない。
+# 業務VM: 環境変数のactivation keyがあればRHSMに登録する(仮想FWが有効なときは
+# subscription.rhsm.redhat.comだけを通す想定)。subscription-managerにはrepoファイルを
+# 管理させず、CDNのリポジトリは使わない。
 - name: Stop subscription-manager from managing repo files
   ansible.builtin.command: subscription-manager config --rhsm.manage_repos=0
   changed_when: false
 
-- name: Wait for the automatic registration configured in the ISO
+# ゴールデンイメージはPacker側でunregisterしてあるので、クローンした直後は
+# 必ず未登録の状態になる。ISOの自動登録を待つ必要は無い(Anacondaの%postで
+# 一度きり実行されるものなので、クローン後の起動では二度と走らない)。
+- name: Check whether RHSM is already registered
   ansible.builtin.command: subscription-manager identity
   register: rhsm_identity
-  until: rhsm_identity.rc == 0
-  retries: 20
-  delay: 30
   changed_when: false
   failed_when: false
 
@@ -26,7 +27,6 @@
 - name: Warn that the VM is not registered with RHSM
   ansible.builtin.debug:
     msg: >-
-      {{ vm.name }} はRHSMに登録されていません。ISOの自動登録の状態(journalctl -b | grep -i -E 'rhc|subscription')と
-      KVMホストの仮想FWのログ(journalctl -k | grep patch-mgmt-fw)を確認するか、
-      環境変数 RHEL_ORG_ID / RHEL_ACTIVATION_KEY を設定して流し直してください。
+      {{ vm.name }} はRHSMに登録されていません。環境変数 RHEL_ORG_ID / RHEL_ACTIVATION_KEY を
+      設定して流し直してください(パッチ適用はinfraのミラーで行うので、登録が無くても検証は進められます)。
   when: rhsm_identity.rc != 0 and (rhel_org_id | length == 0 or rhel_activation_key | length == 0)

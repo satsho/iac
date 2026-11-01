@@ -15,15 +15,17 @@
         dest: /tmp/amazon-ssm-agent.rpm
         mode: "0644"
 
-    # AWS公式のインストールスクリプト(aws/amazon-ecs-init)と同じ取得元・fingerprintで検証する
-    # https://github.com/aws/amazon-ecs-init/blob/master/scripts/ecs-anywhere-install.sh
-    - name: Download the SSM Agent public key
-      ansible.builtin.get_url:
-        url: https://raw.githubusercontent.com/aws/amazon-ecs-init/master/scripts/amazon-ssm-agent.gpg
+    # AWSの公式ドキュメント(Verifying the signature of SSM Agent)に掲載されている公開鍵を
+    # そのままコミットして使う(実行のたびに外部から取得すると、取得元の改ざん・リンク切れ・
+    # 古い鍵を掴むリスクがあるため)。鍵を更新したときはfingerprintもあわせて直すこと。
+    # https://docs.aws.amazon.com/systems-manager/latest/userguide/verify-agent-signature.html
+    - name: Copy the SSM Agent public key
+      ansible.builtin.copy:
+        src: amazon-ssm-agent.gpg
         dest: /tmp/amazon-ssm-agent.gpg
         mode: "0644"
 
-    - name: Read the fingerprint of the downloaded public key
+    - name: Read the fingerprint of the public key
       ansible.builtin.command: gpg --quiet --with-colons --with-fingerprint /tmp/amazon-ssm-agent.gpg
       register: ssm_gpg_fingerprint
       changed_when: false
@@ -31,10 +33,10 @@
     - name: Fail when the public key fingerprint does not match the known value
       ansible.builtin.assert:
         that:
-          - "'8108A07A9EBE248E3F1C63F254F4F56E693ECA21' in ssm_gpg_fingerprint.stdout"
+          - "'1C5B395CBE5E74E2F1CA21592784DBF388D19D46' in ssm_gpg_fingerprint.stdout"
         fail_msg: >-
-          SSM Agentの公開鍵のfingerprintが想定値(8108A07A9EBE248E3F1C63F254F4F56E693ECA21)と
-          異なります。改ざんの可能性があるためインストールを中断します。
+          SSM Agentの公開鍵のfingerprintが想定値(1C5B 395C BE5E 74E2 F1CA 2159 2784 DBF3 88D1 9D46)と
+          異なります。files/amazon-ssm-agent.gpgが壊れているか改ざんされています。
 
     - name: Import the SSM Agent public key into RPM
       ansible.builtin.command:

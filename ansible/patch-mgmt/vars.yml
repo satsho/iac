@@ -41,6 +41,11 @@ ssh_known_hosts_file: "~/.ssh/known_hosts_patch_mgmt"
 #                  パッケージはinfraのミラー(同じネットワーク上なのでFWを通らない)から取る
 # IPアドレスは下の vms の nics を元に、libvirtのDHCPでMACアドレスに固定で払い出す。
 
+# KVMホスト自身が自宅LANに繋がっているインターフェース(kea-dhcp4がここでDHCPを配っている)。
+# dnsmasq 2.90の--bind-dynamicのバグ対策(network.xml.j2参照)で、libvirtのdnsmasqに
+# このインターフェースを明示的に除外させるために使う。`ip -br link show`で確認できる。
+host_lan_interface: enp1s0
+
 libvirt_networks:
   - name: patch-mgmt
     bridge: virbr-patchm

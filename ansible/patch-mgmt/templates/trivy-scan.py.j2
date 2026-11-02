@@ -16,8 +16,9 @@ from pathlib import Path
 
 REGION = "{{ aws_region }}"
 BUCKET = "{{ inventory_bucket }}"
-# RHELの脆弱性DBの照合先(trivyのpurlのdistro修飾子に使う)
-DISTRO = "rhel-{{ rhel_release if rhel_release | length > 0 else '10' }}"
+# RHELのメジャーバージョン(SBOMのmetadata.componentに設定する。trivyはここを見て
+# どの脆弱性DB(Red Hatのアドバイザリ)と照合するかを決める。purlだけでは不十分)。
+RHEL_VERSION = "{{ rhel_release if rhel_release | length > 0 else '10' }}"
 
 
 def run_aws(*args):
@@ -50,10 +51,12 @@ def build_sbom(instance_id, entries):
     for e in entries:
         name = e.get("Name")
         version = e.get("Version")
-        arch = e.get("Architecture", "x86_64")
-        if not name or not version:
+        arch = e.get("Architecture")
+        # gpg-pubkeyなどはrpmパッケージではない(Architectureが"(none)"、Versionが
+        # 実体は鍵ID)ので除外する
+        if not name or not version or not arch or arch == "(none)":
             continue
-        purl = f"pkg:rpm/{DISTRO}/{name}@{version}?arch={arch}&distro={DISTRO}"
+        purl = f"pkg:rpm/redhat/{name}@{version}?arch={arch}"
         components.append(
             {
                 "type": "library",
@@ -68,7 +71,9 @@ def build_sbom(instance_id, entries):
         "serialNumber": f"urn:uuid:{instance_id}-{datetime.date.today().isoformat()}",
         "version": 1,
         "metadata": {
-            "component": {"type": "operating-system", "name": instance_id}
+            # trivyがRed Hatのアドバイザリと照合するために必須(RPM由来のSBOMには
+            # OS情報が無いため、trivy公式ドキュメントの手順通り手動で設定する)。
+            "component": {"type": "operating-system", "name": "redhat", "version": RHEL_VERSION}
         },
         "components": components,
     }

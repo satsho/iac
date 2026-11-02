@@ -152,6 +152,15 @@ ssh patch-test
 
 ## 脆弱性スキャン(trivy + Athena)
 
+> **現状、trivyのスキャン自体は保留中。** trivyがRHEL 10の脆弱性検知に未対応で、
+> `unable to find CPE indices`で失敗する(trivyのメンテナーいわく
+> "Trivy currently doesn't support vulnerability detection for Red Hat 10"、
+> [trivy-db#435](https://github.com/aquasecurity/trivy-db/issues/435))。
+> 対応状況は[trivy#7452](https://github.com/aquasecurity/trivy/issues/7452)で追える。
+> trivy本体・スクリプト・SSM Inventory/Resource Data Sync/Glue/Athenaの基盤は
+> 用意済みで、`patch-trivy-scan.timer`だけ止めてある。対応されたら
+> `tasks/trivy.yml`最後のタスクを`enabled: true`/`state: started`に戻すだけでよい。
+
 全VMのインストール済みパッケージ一覧(SSM Inventory)を、infra上のtrivyで毎日スキャンし、
 結果をS3へアップロードする(terraform/environments/patch-mgmtの`inventory.tf`参照)。
 

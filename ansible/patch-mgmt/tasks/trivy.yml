@@ -65,8 +65,14 @@
 - name: Apply the systemd changes
   ansible.builtin.meta: flush_handlers
 
-- name: Start the vulnerability scan timer
+# trivyがRHEL 10の脆弱性検知に未対応("unable to find CPE indices"、
+# https://github.com/aquasecurity/trivy-db/issues/435 、trivyのメンテナーいわく
+# "Trivy currently doesn't support vulnerability detection for Red Hat 10")。
+# 対応状況: https://github.com/aquasecurity/trivy/issues/7452
+# 対応されるまでタイマーは止めておく(trivy本体・スクリプトは入れておき、対応後は
+# このタスクのenabled/stateをtrue/startedに戻すだけで動かせる)。
+- name: Stop the vulnerability scan timer until trivy supports RHEL 10
   ansible.builtin.systemd:
     name: patch-trivy-scan.timer
-    enabled: true
-    state: started
+    enabled: false
+    state: stopped

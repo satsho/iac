@@ -11,9 +11,9 @@
     gpgcheck: true
     gpgkey: https://aquasecurity.github.io/trivy-repo/rpm/public.key
 
-- name: Install trivy and python3
+- name: Install trivy, python3 and unzip
   ansible.builtin.dnf:
-    name: [trivy, python3]
+    name: [trivy, python3, unzip]
     state: present
 
 # aws-cliはRHELの標準リポジトリに無いため、AWS公式のインストーラを使う

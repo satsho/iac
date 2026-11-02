@@ -166,6 +166,12 @@ Resources:
                   - logs:*
                   - cloudwatch:*
                 Resource: '*'
+              # 脆弱性スキャン結果のAthenaクエリ用(environments/patch-mgmt/inventory.tf)。
+              - Sid: GlueBroad
+                Effect: Allow
+                Action:
+                  - glue:*
+                Resource: '*'
 
 Outputs:
   RoleArn:

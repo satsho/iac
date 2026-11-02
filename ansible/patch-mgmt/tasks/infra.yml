@@ -71,4 +71,4 @@
   loop: [httpd, patch-mirror-sync.timer]
 
 - name: Set up the daily vulnerability scan (SSM Inventory + trivy)
-  ansible.builtin.import_tasks: trivy.yml
+  ansible.builtin.include_tasks: trivy.yml

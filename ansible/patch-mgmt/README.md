@@ -150,6 +150,41 @@ Host patch-*
 ssh patch-test
 ```
 
+## 脆弱性スキャン(trivy + Athena)
+
+全VMのインストール済みパッケージ一覧(SSM Inventory)を、infra上のtrivyで毎日スキャンし、
+結果をS3へアップロードする(terraform/environments/patch-mgmtの`inventory.tf`参照)。
+
+- Amazon Inspectorは使わない(オンプレのハイブリッドノードが対象外の可能性があるため)
+- 収集: SSM Inventory(`AWS-GatherSoftwareInventory`、全VM対象、毎日)
+- スキャン: infra上の`trivy-scan.py`(`patch-trivy-scan.timer`、毎日) が、各VMのInventoryから
+  CycloneDX SBOMを組み立てて`trivy sbom`でスキャンし、結果をS3(`s3://<inventory_bucket>/trivy-results/`)へ
+- 生のInventoryデータも、AWS標準機能のResource Data SyncでS3(`.../inventory/`)へ自動同期される
+- Glueクローラが両方のS3データを毎日クロールしてAthenaから使えるテーブルにする
+
+前提として、Terraform適用後に`terraform output -raw inventory_bucket_name`の値を
+`ansible/patch-mgmt/vars.yml`の`inventory_bucket`へ反映してから`site.yml`を流すこと。
+
+### Athenaで見る
+
+```sql
+-- 2026年11月2日時点のpatch-repositoryの脆弱性一覧
+SELECT vulnerability_id, pkg_name, installed_version, severity
+FROM "<terraformのinventory_glue_database>"."trivy_results"
+WHERE dt = '2026-11-02' AND instance_id = 'mi-...'
+```
+
+(Glueクローラが実行されるまでテーブルは現れない。`terraform apply`直後は
+コンソールの「クローラを今すぐ実行」で待たずに試せる)
+
+### QuickSightで見る
+
+QuickSightのTerraform対応は薄いため、コンソールで手動設定する想定:
+
+1. QuickSight → データセット → 新規データセット → Athena
+2. Terraformのoutput`inventory_glue_database`のデータベースを選択
+3. `trivy_results`テーブルを選び、重大度(severity)別の件数や、インスタンス別の推移をグラフ化する
+
 ## 作り直す・消す
 
 `site.yml` は既にある VM を作り直さない。VM ごと作り直したいときは、その VM を消してから流し直す:

@@ -6,6 +6,9 @@ timezone: Asia/Tokyo
 
 # Terraform(terraform/environments/patch-mgmt)の output hybrid_node_role_name
 ssm_hybrid_role: iac-poc-patch-hybrid-node-role
+# Terraform(terraform/environments/patch-mgmt)の output inventory_bucket_name
+# (terraform apply後、`terraform output -raw inventory_bucket_name`の値に書き換える)
+inventory_bucket: CHANGE_ME_terraform_output_inventory_bucket_name
 
 # ---------------------------------------------------------------------------
 # KVMホスト
@@ -107,6 +110,9 @@ upstream_repos:
 # systemdのOnCalendar形式(timezone基準)
 reposync_schedule: "*-*-* 00:00:00"
 mirror_sync_schedule: "*-*-* 01:00:00"
+# 各VMのSSM Inventory収集(Terraformのinventory_schedule、デフォルトJST 02:00)の後、
+# Glueクローラ(Terraformのinventory_crawler_schedule、デフォルトJST 03:00)の前に流す
+trivy_scan_schedule: "*-*-* 02:30:00"
 
 # ---------------------------------------------------------------------------
 # VM

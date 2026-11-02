@@ -36,3 +36,13 @@ output "dashboard_urls" {
     k => "${local.console_base}/cloudwatch/home?region=${var.aws_region}#dashboards/dashboard/${d.dashboard_name}"
   }
 }
+
+output "inventory_bucket_name" {
+  description = "SSM Inventory / trivyスキャン結果の置き場(ansible/patch-mgmt/vars.yml の inventory_bucket に設定する)"
+  value       = aws_s3_bucket.inventory.id
+}
+
+output "inventory_glue_database" {
+  description = "AthenaでクエリするGlueデータベース名。QuickSightのデータソースにもこれを指定する"
+  value       = aws_glue_catalog_database.patch_mgmt.name
+}

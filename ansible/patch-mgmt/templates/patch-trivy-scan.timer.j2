@@ -1,0 +1,10 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Daily vulnerability scan of installed packages
+
+[Timer]
+OnCalendar={{ trivy_scan_schedule }}
+Persistent=true
+
+[Install]
+WantedBy=timers.target

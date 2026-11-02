@@ -1,0 +1,72 @@
+---
+# infra: 全VMのSSM Inventory(パッケージ一覧)をtrivyでスキャンし、結果をS3へアップロードする。
+# SSM InventoryやCVE DBの問い合わせはAWS/インターネットが必要なので、patch-mgmtネットワーク
+# (NAT、仮想FWなし)に出られるinfraだけで動かす。
+
+- name: Add the trivy repository
+  ansible.builtin.yum_repository:
+    name: trivy
+    description: Trivy repository
+    baseurl: https://aquasecurity.github.io/trivy-repo/rpm/releases/$releasever/$basearch/
+    gpgcheck: true
+    gpgkey: https://aquasecurity.github.io/trivy-repo/rpm/public.key
+
+- name: Install trivy and python3
+  ansible.builtin.dnf:
+    name: [trivy, python3]
+    state: present
+
+# aws-cliはRHELの標準リポジトリに無いため、AWS公式のインストーラを使う
+- name: Check whether the AWS CLI is already installed
+  ansible.builtin.stat:
+    path: /usr/local/bin/aws
+  register: aws_cli
+
+- name: Install the AWS CLI
+  when: not aws_cli.stat.exists
+  block:
+    - name: Download the AWS CLI installer
+      ansible.builtin.get_url:
+        url: https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip
+        dest: /tmp/awscliv2.zip
+        mode: "0644"
+
+    - name: Unzip the AWS CLI installer
+      ansible.builtin.unarchive:
+        src: /tmp/awscliv2.zip
+        dest: /tmp
+        remote_src: true
+        creates: /tmp/aws/install
+
+    - name: Run the AWS CLI installer
+      ansible.builtin.command: /tmp/aws/install
+      changed_when: true
+
+    - name: Remove the AWS CLI installer files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: [/tmp/awscliv2.zip, /tmp/aws]
+
+- name: Install the vulnerability scan script
+  ansible.builtin.template:
+    src: trivy-scan.py.j2
+    dest: /usr/local/sbin/trivy-scan.py
+    mode: "0755"
+
+- name: Install the vulnerability scan service and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: "0644"
+  loop: [patch-trivy-scan.service, patch-trivy-scan.timer]
+  notify: Reload systemd
+
+- name: Apply the systemd changes
+  ansible.builtin.meta: flush_handlers
+
+- name: Start the vulnerability scan timer
+  ansible.builtin.systemd:
+    name: patch-trivy-scan.timer
+    enabled: true
+    state: started

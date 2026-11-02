@@ -7,8 +7,7 @@ timezone: Asia/Tokyo
 # Terraform(terraform/environments/patch-mgmt)の output hybrid_node_role_name
 ssm_hybrid_role: iac-poc-patch-hybrid-node-role
 # Terraform(terraform/environments/patch-mgmt)の output inventory_bucket_name
-# (terraform apply後、`terraform output -raw inventory_bucket_name`の値に書き換える)
-inventory_bucket: CHANGE_ME_terraform_output_inventory_bucket_name
+inventory_bucket: iac-poc-patch-inventory-563613886922
 
 # ---------------------------------------------------------------------------
 # KVMホスト

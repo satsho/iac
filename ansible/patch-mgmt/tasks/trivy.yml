@@ -7,7 +7,7 @@
   ansible.builtin.yum_repository:
     name: trivy
     description: Trivy repository
-    baseurl: https://aquasecurity.github.io/trivy-repo/rpm/releases/$releasever/$basearch/
+    baseurl: https://aquasecurity.github.io/trivy-repo/rpm/releases/$basearch/
     gpgcheck: true
     gpgkey: https://aquasecurity.github.io/trivy-repo/rpm/public.key
 

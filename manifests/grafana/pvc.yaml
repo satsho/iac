@@ -1,0 +1,13 @@
+# Grafana自身のデータ(ダッシュボード定義、sqlite db)の永続化。
+# k3s標準のlocal-path provisionerを使う(storageClassNameは指定しない=デフォルト)。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-data
+  namespace: grafana
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi

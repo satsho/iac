@@ -1,0 +1,25 @@
+# grafana-athena-datasourceプラグインの設定を自動プロビジョニングする
+# (手でデータソース画面から設定しなくてよいようにする)。
+# 認証はAWS_SHARED_CREDENTIALS_FILE(deployment.yamlでホストの/root/.awsを
+# マウント)を使う想定。プラグインのバージョンによりjsonDataのキーが変わる
+# ことがあるので、反映されない場合はGrafanaのデータソース画面で確認・調整すること。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: grafana
+data:
+  athena.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: patch-mgmt-inventory
+        type: grafana-athena-datasource
+        access: proxy
+        isDefault: true
+        jsonData:
+          authType: default
+          defaultRegion: ap-northeast-1
+          catalog: AwsDataCatalog
+          database: iac_poc_patch_inventory
+          workgroup: primary
+          outputLocation: s3://iac-poc-patch-inventory-563613886922/athena-results/

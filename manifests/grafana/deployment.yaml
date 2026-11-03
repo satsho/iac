@@ -1,0 +1,76 @@
+# grafana-admin シークレットを事前に作成しておくこと:
+#   kubectl create namespace grafana
+#   kubectl create secret generic grafana-admin -n grafana \
+#     --from-literal=username=admin --from-literal=password='<任意のパスワード>'
+#
+# 認証はkeycloakと同様にGitOpsの管理対象外(パスワードを公開リポジトリに
+# コミットしたくないため)。
+#
+# AthenaへのアクセスはSSM Hybrid Activationの一時クレデンシャル
+# (/root/.aws/credentials、ホスト上でSSM Agentが自動更新)をhostPathでそのまま
+# マウントして使う(hermes-agentのバックアップCronJobと同じパターン)。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.4.0
+          env:
+            - name: GF_INSTALL_PLUGINS
+              value: grafana-athena-datasource
+            - name: GF_SECURITY_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin
+                  key: username
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin
+                  key: password
+            - name: GF_SERVER_ROOT_URL
+              value: https://grafana.focus4.net
+            - name: AWS_SHARED_CREDENTIALS_FILE
+              value: /host-aws/credentials
+            - name: AWS_REGION
+              value: ap-northeast-1
+          ports:
+            - containerPort: 3000
+          volumeMounts:
+            - name: grafana-data
+              mountPath: /var/lib/grafana
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+              readOnly: true
+            - name: host-aws-creds
+              mountPath: /host-aws
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+      volumes:
+        - name: grafana-data
+          persistentVolumeClaim:
+            claimName: grafana-data
+        - name: datasources
+          configMap:
+            name: grafana-datasources
+        - name: host-aws-creds
+          hostPath:
+            path: /root/.aws
+            type: Directory

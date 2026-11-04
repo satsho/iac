@@ -60,6 +60,33 @@ resource "aws_iam_role_policy" "hybrid_node_command_logs" {
   })
 }
 
+# infra上のtrivy-scan.sh(ansible/patch-mgmt)が、各VMのInventory(パッケージ一覧)を読んで
+# SBOMを組み立て、trivyでスキャンした結果をS3へ書き出すための権限。
+# hybrid_nodeロールは全VM共通なので、infra以外のVM(読み取り専用コマンド)にも付くが、
+# 実際にtrivy-scan.shを動かすのはinfraだけ(ansible/patch-mgmt/tasks/trivy.yml参照)。
+resource "aws_iam_role_policy" "hybrid_node_inventory_scan" {
+  name = "inventory-vulnerability-scan"
+  role = aws_iam_role.hybrid_node.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "ReadInventory"
+        Effect   = "Allow"
+        Action   = ["ssm:ListInventoryEntries", "ssm:DescribeInstanceInformation"]
+        Resource = "*"
+      },
+      {
+        Sid      = "WriteScanResults"
+        Effect   = "Allow"
+        Action   = "s3:PutObject"
+        Resource = "${aws_s3_bucket.inventory.arn}/trivy-results/*"
+      },
+    ]
+  })
+}
+
 # ---------------------------------------------------------------------------
 # メンテナンスウィンドウ / Automation(Runbook)用
 # ---------------------------------------------------------------------------

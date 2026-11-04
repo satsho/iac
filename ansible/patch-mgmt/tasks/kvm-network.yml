@@ -1,10 +1,22 @@
 ---
 # KVMホスト: libvirtのネットワークを1つ定義して起動する(loop_var: net)
+#
+# 既存のUUIDを読んでテンプレートに埋め込まないと、定義を更新するたびに
+# virsh net-defineが「同名で別UUIDのネットワークを新規作成しようとしている」
+# と判断して失敗する("network '{{ net.name }}' already exists with uuid ...")。
+- name: Read the UUID of the existing network, if any - {{ net.name }}
+  ansible.builtin.command: "virsh net-uuid {{ net.name }}"
+  register: net_uuid
+  changed_when: false
+  failed_when: false
+
 - name: Render the network definition - {{ net.name }}
   ansible.builtin.template:
     src: network.xml.j2
     dest: "{{ libvirt_image_dir }}/{{ net.name }}.xml"
     mode: "0644"
+  vars:
+    existing_uuid: "{{ net_uuid.stdout | trim if net_uuid.rc == 0 else '' }}"
   register: net_xml
 
 - name: Check whether the libvirt network exists - {{ net.name }}

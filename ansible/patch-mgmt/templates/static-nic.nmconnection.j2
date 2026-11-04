@@ -1,0 +1,18 @@
+[connection]
+id={{ nic.network }}
+type=ethernet
+autoconnect=true
+
+[ethernet]
+mac-address={{ nic.mac | upper }}
+
+[ipv4]
+method=manual
+address1={{ nic.address }}/{{ net.prefix }}
+{% if is_primary %}
+gateway={{ net.address }}
+{% endif %}
+dns={{ net.address }};
+
+[ipv6]
+method=disabled

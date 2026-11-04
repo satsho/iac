@@ -1,0 +1,10 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Scan installed packages (SSM Inventory) with trivy and upload results to S3
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/trivy-scan.py
+TimeoutStartSec=2h

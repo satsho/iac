@@ -57,6 +57,18 @@ variable "patch_scan_schedule" {
   default     = "cron(30 16 * * ? *)"
 }
 
+variable "inventory_schedule" {
+  description = "全サーバのインストール済みパッケージ一覧収集(SSM Inventory)のスケジュール。関連付けのcron式はUTC固定(デフォルトはJST 02:00)"
+  type        = string
+  default     = "cron(0 17 * * ? *)"
+}
+
+variable "inventory_crawler_schedule" {
+  description = "Inventory/trivyの結果をAthenaでクエリできるようにするGlueクローラのスケジュール(cron式はUTC固定)。毎日のインベントリ収集・trivyスキャンの後に走らせる(デフォルトはJST 03:00)"
+  type        = string
+  default     = "cron(0 18 * * ? *)"
+}
+
 variable "maintenance_windows" {
   description = <<-EOT
     パッチ適用(Install)のメンテナンスウィンドウ。キーがウィンドウ名になる。

@@ -89,10 +89,25 @@ source "qemu" "rhel10_golden" {
   # 各VM側の既存のタスク(rhsm-mirror.yml/rhsm-workload.yml、「登録済みか確認し、
   # 未登録ならactivation keyで登録する」)が、クローン後にそれぞれ別の登録を
   # 行えるようにする。
-  shutdown_command = "sudo subscription-manager unregister; sudo poweroff"
+  #
+  # shutdown_commandはTTYなしでSSH実行されるため、sudoがパスワードを対話的に
+  # 聞いてくる設定だと "a terminal is required" で止まる。sudo -S でパスワードを
+  # 標準入力から渡す。
+  shutdown_command = "echo '${var.ssh_password}' | sudo -S subscription-manager unregister; echo '${var.ssh_password}' | sudo -S poweroff"
   shutdown_timeout = "5m"
 }
 
 build {
   sources = ["source.qemu.rhel10_golden"]
+
+  # キックスタートにnetworkの設定が無いため、インストール直後は有線接続の
+  # 自動接続(autoconnect)が無効になっており、クローンした5台も同じ問題を
+  # 引き継いでしまう(SSH接続待ちで固まる原因になる)。ゴールデンイメージの
+  # 時点で直しておく。接続名(ens3)は環境によって変わる可能性があるため、
+  # もし別の名前なら `nmcli con show` で確認して読み替えること。
+  provisioner "shell" {
+    inline = [
+      "echo '${var.ssh_password}' | sudo -S nmcli con modify ens3 connection.autoconnect yes",
+    ]
+  }
 }

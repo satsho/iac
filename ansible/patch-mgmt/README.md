@@ -27,7 +27,9 @@ VM作成は2段階になっている。**フルのOSインストールはゴー�
 
 1. **KVMホスト**(ローカル実行)
    - 業務VMのネットワーク向けの仮想FW(nftables。許可ドメインだけ外に出す)を用意する
-   - libvirtのネットワーク2つを作る(VMのIPはMACアドレスでDHCP固定)
+   - libvirtのネットワーク2つを作る(DHCPは使わない。VMのIPはクローン直後・起動前に
+     ディスクへ直接書き込む固定IP。dnsmasq 2.90のbind-dynamicのバグで、ホストのLAN側
+     DHCPサーバーとポート67を取り合うため)
    - まだ無いVMを、ゴールデンイメージをクローンして作る(フルインストールはしない)
    - 停止状態のVMに、ミラー用データディスクを付けてから起動する
 2. **repository / infra**(SSH)
@@ -148,6 +150,50 @@ Host patch-*
 ssh patch-test
 ```
 
+## 脆弱性スキャン(trivy + Athena)
+
+> **現状、trivyのスキャン自体は保留中。** trivyがRHEL 10の脆弱性検知に未対応で、
+> `unable to find CPE indices`で失敗する(trivyのメンテナーいわく
+> "Trivy currently doesn't support vulnerability detection for Red Hat 10"、
+> [trivy-db#435](https://github.com/aquasecurity/trivy-db/issues/435))。
+> 対応状況は[trivy#7452](https://github.com/aquasecurity/trivy/issues/7452)で追える。
+> trivy本体・スクリプト・SSM Inventory/Resource Data Sync/Glue/Athenaの基盤は
+> 用意済みで、`patch-trivy-scan.timer`だけ止めてある。対応されたら
+> `tasks/trivy.yml`最後のタスクを`enabled: true`/`state: started`に戻すだけでよい。
+
+全VMのインストール済みパッケージ一覧(SSM Inventory)を、infra上のtrivyで毎日スキャンし、
+結果をS3へアップロードする(terraform/environments/patch-mgmtの`inventory.tf`参照)。
+
+- Amazon Inspectorは使わない(オンプレのハイブリッドノードが対象外の可能性があるため)
+- 収集: SSM Inventory(`AWS-GatherSoftwareInventory`、全VM対象、毎日)
+- スキャン: infra上の`trivy-scan.py`(`patch-trivy-scan.timer`、毎日) が、各VMのInventoryから
+  CycloneDX SBOMを組み立てて`trivy sbom`でスキャンし、結果をS3(`s3://<inventory_bucket>/trivy-results/`)へ
+- 生のInventoryデータも、AWS標準機能のResource Data SyncでS3(`.../inventory/`)へ自動同期される
+- Glueクローラが両方のS3データを毎日クロールしてAthenaから使えるテーブルにする
+
+前提として、Terraform適用後に`terraform output -raw inventory_bucket_name`の値を
+`ansible/patch-mgmt/vars.yml`の`inventory_bucket`へ反映してから`site.yml`を流すこと。
+
+### Athenaで見る
+
+```sql
+-- 2026年11月2日時点のpatch-repositoryの脆弱性一覧
+SELECT vulnerability_id, pkg_name, installed_version, severity
+FROM "<terraformのinventory_glue_database>"."trivy_results"
+WHERE dt = '2026-11-02' AND instance_id = 'mi-...'
+```
+
+(Glueクローラが実行されるまでテーブルは現れない。`terraform apply`直後は
+コンソールの「クローラを今すぐ実行」で待たずに試せる)
+
+### QuickSightで見る
+
+QuickSightのTerraform対応は薄いため、コンソールで手動設定する想定:
+
+1. QuickSight → データセット → 新規データセット → Athena
+2. Terraformのoutput`inventory_glue_database`のデータベースを選択
+3. `trivy_results`テーブルを選び、重大度(severity)別の件数や、インスタンス別の推移をグラフ化する
+
 ## 作り直す・消す
 
 `site.yml` は既にある VM を作り直さない。VM ごと作り直したいときは、その VM を消してから流し直す:
@@ -172,9 +218,8 @@ playbook を使わずに VM を消すと、RHSM のシステムと SSM の `mi-.
 
 | 症状 | 見るところ |
 |---|---|
-| ネットワークの起動で `dnsmasq: failed to bind DHCP server socket: Address already in use` | KVMホストの別のプロセスが DHCP のポート(UDP 67)を使っている。`ss -ulpn \| grep -E ':67\s'` で確認し、家の dnsmasq なら `bind-interfaces` と `interface=<LAN側のNIC>` で待ち受けを絞る(使っていなければ止める) |
 | ゴールデンイメージのビルド(`packer build`)でインストールが終わらず止まる | [`packer/README.md`](packer/README.md)の「前提」を参照。ISO のキックスタートに `reboot` / `poweroff` が無いと、最後に Enter 待ちで止まる |
-| SSH がつながらない | `virsh domifaddr <VM名>` / `virsh net-dhcp-leases patch-mgmt` でIPが払い出されているか |
+| SSH がつながらない | `virsh domifaddr <VM名>` で固定IPが見えているか。無ければ `virt-customize`での静的IP書き込み(kvm-install.yml)がVM起動前に済んでいるか確認 |
 | repository で EUS のリポジトリを有効にできない | サブスクリプションに EUS が無い可能性(Terraform 側 README の「前提 4.」) |
 | 業務VMの SSM 登録・RHSM 登録が失敗する | KVMホストで `journalctl -k \| grep 'patch-mgmt-fw drop:'`(必要な宛先を落としていないか)と `nft list set inet patch_mgmt_fw https_v4`(許可リストに IP が入っているか) |
 | 許可リストが空のまま増えない | dnsmasq が SELinux に止められていないか(`ausearch -m avc -ts recent -c dnsmasq`)。playbook は `dnsmasq_use_ipset` を有効にしている |

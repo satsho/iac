@@ -15,7 +15,7 @@ resource "aws_cloudfront_distribution" "site" {
     cached_methods         = ["GET", "HEAD"]
     target_origin_id       = "s3-site"
     viewer_protocol_policy = "redirect-to-https"
-    compress                = true
+    compress               = true
 
     forwarded_values {
       query_string = false
@@ -33,12 +33,12 @@ resource "aws_cloudfront_distribution" "site" {
   # キャッシュさせない(min/default/max_ttl = 0)。実際のキャッシュ制御は
   # 必要になったらS3側のCache-Controlヘッダで調整する。
   ordered_cache_behavior {
-    path_pattern            = "/images/*"
-    allowed_methods         = ["GET", "HEAD"]
-    cached_methods           = ["GET", "HEAD"]
-    target_origin_id        = "s3-site"
-    viewer_protocol_policy  = "redirect-to-https"
-    compress                = true
+    path_pattern           = "/images/*"
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = "s3-site"
+    viewer_protocol_policy = "redirect-to-https"
+    compress               = true
 
     forwarded_values {
       query_string = false

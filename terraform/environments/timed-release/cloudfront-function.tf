@@ -8,8 +8,8 @@ resource "aws_cloudfront_key_value_store" "release_gate" {
 # 管理外にする。
 resource "aws_cloudfrontkeyvaluestore_key" "release_time" {
   key_value_store_arn = aws_cloudfront_key_value_store.release_gate.arn
-  key                  = "release_time_secret_jpg"
-  value                = var.release_time
+  key                 = "release_time_secret_jpg"
+  value               = var.release_time
 
   lifecycle {
     ignore_changes = [value]

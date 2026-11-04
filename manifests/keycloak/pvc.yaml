@@ -1,0 +1,14 @@
+# Keycloakの組み込みH2 DB(/opt/keycloak/data)の永続化。これが無いとPodが
+# 作り直されるたびにrealm・クライアント・IdP設定がすべて消える。
+# k3s標準のlocal-path provisionerを使う(storageClassNameは指定しない=デフォルト)。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: keycloak-data
+  namespace: keycloak
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

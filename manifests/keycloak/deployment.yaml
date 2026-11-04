@@ -11,6 +11,9 @@ metadata:
   namespace: keycloak
 spec:
   replicas: 1
+  # H2のDBファイルは複数プロセスから同時に開けないので、旧Podを止めてから起動する。
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: keycloak
@@ -44,6 +47,9 @@ spec:
               value: xforwarded
             - name: KC_HOSTNAME
               value: keycloak.focus4.net
+          volumeMounts:
+            - name: keycloak-data
+              mountPath: /opt/keycloak/data
           ports:
             - containerPort: 8080
           readinessProbe:
@@ -51,3 +57,7 @@ spec:
               port: 8080
             initialDelaySeconds: 20
             periodSeconds: 10
+      volumes:
+        - name: keycloak-data
+          persistentVolumeClaim:
+            claimName: keycloak-data

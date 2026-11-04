@@ -34,16 +34,6 @@ resource "aws_route53_record" "keycloak_tailscale" {
   records = [var.tailscale_home_ip]
 }
 
-# Hermes Agentダッシュボードも同じホスト上のGatewayで受けているため、
-# 同じTailscale IPを指す。
-resource "aws_route53_record" "hermes_tailscale" {
-  zone_id = aws_route53_zone.main.zone_id
-  name    = "hermes.${var.domain_name}"
-  type    = "A"
-  ttl     = 300
-  records = [var.tailscale_home_ip]
-}
-
 # Grafana(脆弱性スキャン/Inventoryダッシュボード)も同じホスト上のGatewayで受ける。
 resource "aws_route53_record" "grafana_tailscale" {
   zone_id = aws_route53_zone.main.zone_id

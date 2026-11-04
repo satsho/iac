@@ -21,6 +21,21 @@ spec:
       template:
         spec:
           restartPolicy: OnFailure
+          # amazon/aws-cliイメージにはtarが入っていないので、アーカイブ作成は
+          # busyboxのinitContainerで行い、emptyDir経由でアップロード側に渡す。
+          initContainers:
+            - name: archive
+              image: rancher/mirrored-library-busybox:1.37.0
+              volumeMounts:
+                - name: hermes-data
+                  mountPath: /opt/data
+                  readOnly: true
+                - name: archive
+                  mountPath: /backup
+              command:
+                - sh
+                - -c
+                - tar -czf /backup/hermes.tar.gz -C /opt/data .
           containers:
             - name: backup
               image: amazon/aws-cli:2.27.0
@@ -32,8 +47,8 @@ spec:
                 - name: S3_BUCKET
                   value: iac-poc-hermes-backups
               volumeMounts:
-                - name: hermes-data
-                  mountPath: /opt/data
+                - name: archive
+                  mountPath: /backup
                   readOnly: true
                 - name: host-aws-creds
                   mountPath: /host-aws
@@ -44,10 +59,11 @@ spec:
                 - |
                   set -eu
                   DATE=$(date +%Y%m%d-%H%M%S)
-                  tar -czf "/tmp/hermes-${DATE}.tar.gz" -C /opt/data .
-                  aws s3 cp "/tmp/hermes-${DATE}.tar.gz" \
+                  aws s3 cp /backup/hermes.tar.gz \
                     "s3://${S3_BUCKET}/hermes-agent/hermes-${DATE}.tar.gz"
           volumes:
+            - name: archive
+              emptyDir: {}
             - name: hermes-data
               persistentVolumeClaim:
                 claimName: hermes-agent-data

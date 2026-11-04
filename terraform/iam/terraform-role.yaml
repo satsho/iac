@@ -172,6 +172,12 @@ Resources:
                 Action:
                   - glue:*
                 Resource: '*'
+              # 日時指定公開テスト用(environments/timed-release)。
+              - Sid: CloudFrontBroad
+                Effect: Allow
+                Action:
+                  - cloudfront:*
+                Resource: '*'
 
 Outputs:
   RoleArn:

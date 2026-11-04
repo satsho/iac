@@ -163,14 +163,17 @@ resource "aws_iam_role_policy" "patch_automation" {
         }
       },
       {
-        # メンテナンスウィンドウのAUTOMATIONタスクから、このスタックのRunbookだけを起動できる
+        # メンテナンスウィンドウのAUTOMATIONタスクから、このスタックのRunbookだけを起動できる。
+        # 実際の認可はdocument/のARNに対して行われるので、automation-definition/だけでは拒否される。
         Sid    = "StartPatchRunbooks"
         Effect = "Allow"
         Action = "ssm:StartAutomationExecution"
-        Resource = [
-          for doc in values(local.document_names) :
-          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:automation-definition/${doc}:*"
-        ]
+        Resource = flatten([
+          for doc in values(local.document_names) : [
+            "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:automation-definition/${doc}:*",
+            "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:document/${doc}",
+          ]
+        ])
       },
       {
         Sid      = "PassSelfToAutomation"

@@ -405,6 +405,63 @@ CVE ID は Patch Manager の仕様で **未適用(Missing)と失敗(Failed)の�
 status ダッシュボードは「直近1時間」で見る前提にしている。範囲を広げると、その後に適用されて
 消えたパッチも古い行として残って見える(`CollectedAt` 列で集計時刻が分かる)。
 
+### 失敗したメンテナンスウィンドウ/Runbookを調べる
+
+メンテナンスウィンドウが `FAILED` で終わったとき、SNSの通知だけでは
+「何が・どこで」失敗したかまでは分からない。以下の順にAWS CLIで掘っていく
+(すべて `--region ap-northeast-1` を付ける)。
+
+1. ウィンドウIDを確認する
+
+   ```bash
+   aws ssm describe-maintenance-windows \
+     --query 'WindowIdentities[].{Name:Name,Id:WindowId,Enabled:Enabled,Schedule:Schedule}' \
+     --output table
+   ```
+
+2. そのウィンドウの実行履歴(直近の`Status`と実行ID)を見る
+
+   ```bash
+   aws ssm describe-maintenance-window-executions \
+     --window-id <mw-xxxx> \
+     --query 'WindowExecutions[0:3].{Status:Status,Start:StartTime,End:EndTime,Id:WindowExecutionId}' \
+     --output table
+   ```
+
+3. その実行のタスク単位の状態(`StatusDetails`)とタスク実行IDを見る。
+   `AUTOMATION`タスクが`FAILED`でも、`StatusDetails`は
+   "The maximum error count was exceeded." のように詳細を言わないことが多い
+
+   ```bash
+   aws ssm describe-maintenance-window-execution-tasks \
+     --window-execution-id <上のId> \
+     --query 'WindowExecutionTaskIdentities[].{TaskExecutionId:TaskExecutionId,Status:Status,StatusDetails:StatusDetails}' \
+     --output table
+   ```
+
+4. タスクの呼び出し(対象VMごと)を見て、Automationの実行ID(`ExecutionId`)を取る
+
+   ```bash
+   aws ssm describe-maintenance-window-execution-task-invocations \
+     --window-execution-id <上のId> \
+     --task-id <上のTaskExecutionId> \
+     --query 'WindowExecutionTaskInvocationIdentities[].{Status:Status,StatusDetails:StatusDetails,ExecutionId:ExecutionId}' \
+     --output table
+   ```
+
+5. Automation(`gated-patch-baseline.yaml`などのRunbook)自体の実行結果を見る。
+   ここでようやく、ゲートで止まったのか・インストールの途中で失敗したのか、
+   ステップ単位の`FailureMessage`が分かる
+
+   ```bash
+   aws ssm get-automation-execution \
+     --automation-execution-id <上のExecutionId> \
+     --query 'AutomationExecution.{Status:AutomationExecutionStatus,FailureMessage:FailureMessage,Steps:StepExecutions[].{Name:StepName,Status:StepStatus,FailureMessage:FailureMessage}}'
+   ```
+
+test-weekly(RUN_COMMAND)の場合は手順3までで十分なことが多い
+(`AWS-RunPatchBaseline`の出力は CloudWatch Logs `/iac-poc-patch/run-command` にも残る)。
+
 ## 構築手順
 
 1. **Terraform 実行ロールの権限を反映する**: この環境は SSM・EventBridge(ルールと Scheduler)・SNS・

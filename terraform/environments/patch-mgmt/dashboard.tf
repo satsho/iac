@@ -96,10 +96,15 @@ resource "aws_iam_role_policy" "scheduler" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid      = "StartCollector"
-        Effect   = "Allow"
-        Action   = "ssm:StartAutomationExecution"
-        Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:automation-definition/${local.document_names.collect_compliance}:*"
+        # 実際の認可はdocument/とautomation-execution/のARNに対しても行われる(iam.tfのStartPatchRunbooksと同じ)
+        Sid    = "StartCollector"
+        Effect = "Allow"
+        Action = "ssm:StartAutomationExecution"
+        Resource = [
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:automation-definition/${local.document_names.collect_compliance}:*",
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:document/${local.document_names.collect_compliance}",
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:automation-execution/*",
+        ]
       },
       {
         Sid      = "PassAutomationRole"

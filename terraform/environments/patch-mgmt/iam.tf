@@ -147,6 +147,17 @@ resource "aws_iam_role_policy" "patch_automation" {
         Resource = "*"
       },
       {
+        # install-now(早く当てたい/緊急時)が、承認リストへ個別に追記するための権限
+        Sid    = "UpdateApprovedPatches"
+        Effect = "Allow"
+        Action = [
+          "ssm:GetPatchBaseline",
+          "ssm:GetPatchBaselineForPatchGroup",
+          "ssm:UpdatePatchBaseline",
+        ]
+        Resource = "*"
+      },
+      {
         # ダッシュボード用の集計Runbook(CollectPatchCompliance)の書き出し先
         Sid      = "WriteComplianceLogs"
         Effect   = "Allow"
@@ -180,13 +191,6 @@ resource "aws_iam_role_policy" "patch_automation" {
         Condition = {
           StringEquals = { "iam:PassedToService" = "ssm.amazonaws.com" }
         }
-      },
-      {
-        # 緊急パッチRunbookの承認依頼(aws:approve)の通知
-        Sid      = "NotifyApprovers"
-        Effect   = "Allow"
-        Action   = "sns:Publish"
-        Resource = aws_sns_topic.patch.arn
       },
     ]
   })

@@ -157,8 +157,3 @@ variable "notification_email" {
   default     = ""
 }
 
-variable "emergency_approvers" {
-  description = "緊急パッチRunbookの承認者(IAMユーザー/ロールのARN)のデフォルト値。空の場合は実行時に指定する"
-  type        = list(string)
-  default     = []
-}

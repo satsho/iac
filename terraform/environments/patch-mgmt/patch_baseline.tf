@@ -33,6 +33,13 @@ resource "aws_ssm_patch_baseline" "rhel" {
       values = each.value.severities
     }
   }
+
+  # approved_patchesは、install-now(documents/install-now.yaml)がupdate-patch-baseline APIで
+  # 直接書き換える対象。Terraformが元のvariables.tfの値に巻き戻してしまわないよう、
+  # ここだけ差分検知の対象から外す(初期値はvariables.tfのdefaultで与える)。
+  lifecycle {
+    ignore_changes = [approved_patches]
+  }
 }
 
 resource "aws_ssm_patch_group" "rhel" {

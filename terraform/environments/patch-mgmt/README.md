@@ -49,7 +49,7 @@ Systems Manager(Fleet Manager / Patch Manager / メンテナンスウィンド�
 | `iam.tf` | VM(Hybrid Activation)用ロール、メンテナンスウィンドウ/Runbook用ロール |
 | `patch_baseline.tf` | パッチベースライン・パッチグループ・毎日のスキャン |
 | `maintenance_window.tf` | メンテナンスウィンドウ・ターゲット・タスク |
-| `automation.tf` / `documents/` | ゲート付きパッチ適用、手動再起動、緊急パッチの各Runbook |
+| `automation.tf` / `documents/` | ゲート付きパッチ適用、手動再起動、早く当てたい・緊急パッチ(`InstallNow`)の各Runbook |
 | `notification.tf` | EventBridge → SNS の結果通知、Run Command出力のロググループ |
 | `dashboard.tf` / `documents/collect-patch-compliance.yaml` | 準拠状況・CVEの集計(1時間ごと)と CloudWatch ダッシュボード |
 
@@ -323,41 +323,55 @@ aws ssm start-automation-execution \
 
 なお、再起動待ちが残ったサーバに `RebootIfNeeded` で次のパッチ適用を行うと、そのときに再起動される。
 
-## 緊急パッチ
+## 早く当てたい・緊急パッチ(`InstallNow`)
 
-メンテナンスウィンドウやゲートを待たずに当てる手段。どちらも `EmergencyPatch` Runbook を使い、
-**実行前に承認者の承認(`aws:approve`)を必須**にしている。承認依頼は SNS でメールが届き、
-コンソールの Automation 実行画面から承認・却下する。
+メンテナンスウィンドウ(スケジュール)やゲート(前段の成功確認)を待たずに当てたいときに使う。
+`iac-poc-patch-InstallNow` という1つの Runbook が、両方のケースを兼ねる。
 
-### A. ベースラインの承認リストに追加して当てる(推奨)
+- **すでに承認条件を満たしているパッチを、次の定期ウィンドウを待たず今すぐ当てたい**
+  → `AddApprovedPatches` は空のまま実行する
+- **まだ承認条件(承認日数 / `approve_until_date`)を満たしていないパッチを緊急で当てたい**
+  → `AddApprovedPatches` に `RHSA-2026:12345` のように指定して実行する(複数可、カンマ区切り)
 
-1. `patch_baselines` の `approved_patches` に `RHSA-2026:12345` を追加する PR を作る
-   (承認リストに載ったパッチは承認日数を待たずに承認される)
-2. PR がマージされたら apply
-3. test → stg → prod の順に Runbook を実行する
+どちらの場合も**ゲートは確認しない**(人が直接判断して実行するため)。承認(ベースラインが
+「入れてよい」と判定すること)だけは省略できない — `InstallNow` は承認そのものを
+飛ばしているわけではなく、承認日数という「待ち時間」を省略しているだけで、承認自体は
+必ず通る(個別承認リストへの追記、または既存の承認ルールのどちらか)。
+
+承認を実行する人と、起動する人が同じ想定のため、`aws:approve` のような承認クリックは
+挟まない。実行できるかどうかは IAM 権限だけで制御する。
 
 ```bash
+# 例: すでに承認済みのパッチを、すぐprodに当てたい
 aws ssm start-automation-execution \
-  --document-name iac-poc-patch-EmergencyPatch \
-  --parameters 'TargetTagKey=PatchGroup,TargetTagValues=rhel10-test,Approvers=arn:aws:iam::123456789012:role/admin'
+  --document-name iac-poc-patch-InstallNow \
+  --parameters 'TargetTagValues=rhel10-prod'
+
+# 例: まだ承認されていないRHSA-2026:12345を緊急でtestに当てたい
+aws ssm start-automation-execution \
+  --document-name iac-poc-patch-InstallNow \
+  --parameters 'TargetTagValues=rhel10-test,AddApprovedPatches=RHSA-2026:12345'
 ```
 
-「何を・なぜ緊急で入れたか」が PR として残り、「誰が承認して実行したか」が Automation の
-実行履歴と CloudTrail に残る。
+コンソールから実行する場合は、Systems Manager → 変更管理 → オートメーション →
+`iac-poc-patch-InstallNow` を選択して「実行」。`TargetTagValues` はプルダウン選択、
+`AddApprovedPatches` は正規表現(`RHSA-YYYY:NNNNN`)でのバリデーション付き。
 
-### B. InstallOverrideList でパッケージを直接指定する
+「どのパッチが入る予定か」を事前に確認したい場合は、実行前に **フリートマネージャー →
+対象ノード → パッチタブ → Missing でフィルタ** すると、CVE 付きで確認できる(全VM分を
+まとめて見たい場合は **ノード管理 → コンプライアンス**)。
 
-ベースラインを変えずに、インストールするパッケージを YAML に書いて S3 に置き、URL を
-`InstallOverrideList` に渡す。リストに書いたパッチがベースラインの代わりに使われる。
+「誰が・いつ・どのRHSAを個別承認リストに追加したか」は CloudTrail に残る。PR を経由しない
+ため GitHub 上の記録は残らないが、落ち着いたタイミングで `patch_baselines` の
+`approved_patches` にも反映しておくと、Terraform コード上の記述と実態を合わせられる
+(ただし `approved_patches` は `lifecycle.ignore_changes` の対象なので、反映してもしなくても
+動作自体には影響しない)。
 
-```yaml
-# s3://<bucket>/emergency/openssl.yaml (書式は AWS ドキュメントで要確認)
-patches:
-  - id: 'openssl.x86_64'
-  - id: 'openssl-libs.x86_64'
-```
+### InstallOverrideList について
 
-コンプライアンスの判定は引き続きベースライン基準なので、A の方が後から状態を説明しやすい。
+ベースラインを変えずにパッケージを直接指定する `InstallOverrideList` という手段も
+AWS 側にはあるが、**コンプライアンスの判定が引き続きベースライン基準のままズレる**
+(実際には入っているのに「未承認」の表示が残る)ため、この環境では使わない。
 
 ## 成功・失敗の管理とダッシュボード
 
@@ -365,7 +379,7 @@ patches:
 |---|---|
 | SNS(メール) | EventBridge で拾った以下のイベント |
 | ・メンテナンスウィンドウ | このスタックのウィンドウの実行が SUCCESS / FAILED / TIMED_OUT / CANCELLED で終わった |
-| ・Runbook | ゲート付き適用・手動再起動・緊急パッチの実行が Success / Failed / TimedOut / Cancelled で終わった |
+| ・Runbook | ゲート付き適用・手動再起動・`InstallNow`の実行が Success / Failed / TimedOut / Cancelled で終わった |
 | ・コンプライアンス | VMがパッチ非準拠に**変わった**とき(状態が変わった時だけ通知される) |
 | CloudWatch ダッシュボード `iac-poc-patch-status` | いまの状態: VMごとの準拠状況、未適用・失敗・再起動待ちのパッチとCVE |
 | CloudWatch ダッシュボード `iac-poc-patch-history` | 推移と実行履歴: 環境ごとの未適用パッチ数のグラフ、ウィンドウ・Runbookの結果 |
@@ -522,7 +536,9 @@ SSM のマネージドノードと RHSM の登録も一緒に解除される。
 | Step Functions + EventBridge Scheduler | 「test 成功のイベントから**ちょうど1日後**に stg を流す」のようなイベント駆動の昇格 | 低(今回は曜日固定で代替) |
 
 Systems Manager **Change Manager** は 2025/11/7 以降、新規の利用受付を終了しているため候補から外している。
-変更承認は「ベースライン変更は GitHub の PR」「緊急実行は Runbook の `aws:approve`」で代替している。
+変更承認は「恒久的なベースライン変更は GitHub の PR」「今すぐ当てたい・緊急時は IAM 権限を
+持つ人が `InstallNow` を実行できること自体」で代替している(承認する人と実行する人が同じ
+想定のため、`aws:approve` のような承認クリックは設けていない)。
 
 ## 決めたこと
 
@@ -535,5 +551,5 @@ Systems Manager **Change Manager** は 2025/11/7 以降、新規の利用受付�
 - 使っているサブスクリプションに EUS が含まれるか → 含まれなければ非EUSで進めるか
 - 再起動パターンの割り当て: 今は test/stg が自動、prod が手動
 - アプリ単位のウィンドウのタグ設計: `App` タグで分けるか、`MaintenanceWindow=weekday-night` のようにウィンドウ名をタグに直接持たせるか
-- 緊急パッチの承認者と、Runbook を実行できる人(IAM)の範囲
+- `InstallNow`(早く当てたい・緊急パッチ)を実行できる人(IAM)の範囲
 - 通知先: メールのままか、Slack(Amazon Q Developer in chat applications)に流すか

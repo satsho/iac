@@ -1,0 +1,136 @@
+schemaVersion: '0.3'
+description: |-
+  次の定期メンテナンスウィンドウを待たず、指定したPatchGroupに今すぐInstallを実行する。
+  承認・ゲート・スケジュールのうち、承認だけは省略できない(ベースラインに無いパッチは
+  絶対にインストールされない)ため、必要ならAddApprovedPatchesで個別承認リストに追記して
+  から実行する(update-patch-baselineのapproved-patchesは全置き換えのため、既存のリストを
+  読んでから追記して書き戻す)。ゲートチェックは行わない(人が直接判断して実行するため)。
+assumeRole: '{{ AutomationAssumeRole }}'
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: このRunbookが引き受けるIAMロールのARN
+    default: ${automation_role_arn}
+  TargetTagValues:
+    type: String
+    description: パッチを当てる対象(PatchGroupタグの値)
+    allowedValues: ${jsonencode(patch_groups)}
+  AddApprovedPatches:
+    type: StringList
+    description: >-
+      (任意)緊急で承認リストに追加したいRHSA ID。複数ある場合はカンマ区切りで指定する。
+      通常は空欄のままでよい(すでに承認済みのパッチだけを今すぐ入れたい場合)
+    default: []
+    allowedPattern: '^RHSA-\d{4}:\d+$'
+  RebootOption:
+    type: String
+    description: RebootIfNeeded(必要なら自動再起動、通常はこちら) / NoReboot(再起動は別途手動で行う)
+    default: RebootIfNeeded
+    allowedValues:
+      - RebootIfNeeded
+      - NoReboot
+  MaxConcurrency:
+    type: String
+    description: 同時に実行する台数(例 1, 10%)
+    default: '1'
+  MaxErrors:
+    type: String
+    description: この台数(割合)が失敗したら残りへの実行を止める
+    default: '0'
+  LogGroupName:
+    type: String
+    description: Run Commandの出力先ロググループ
+    default: ${log_group_name}
+mainSteps:
+  - name: AddApprovedPatchesIfNeeded
+    action: aws:executeScript
+    timeoutSeconds: 120
+    onFailure: Abort
+    inputs:
+      Runtime: python3.11
+      Handler: handler
+      InputPayload:
+        PatchGroup: '{{ TargetTagValues }}'
+        NewPatches: '{{ AddApprovedPatches }}'
+      Script: |-
+        import boto3
+
+
+        def handler(events, context):
+            new_patches = [p for p in events["NewPatches"] if p]
+            if not new_patches:
+                return {"summary": "追加なし、スキップ(既存の承認内容のまま実行)"}
+
+            ssm = boto3.client("ssm")
+            baseline_id = ssm.get_patch_baseline_for_patch_group(
+                PatchGroup=events["PatchGroup"]
+            )["BaselineId"]
+
+            # update-patch-baselineのapproved-patchesは全置き換えのため、
+            # 必ず現在のリストを読んでから追記して書き戻す(既存の個別承認分を消さない)
+            current = ssm.get_patch_baseline(BaselineId=baseline_id).get("ApprovedPatches", [])
+            added = [p for p in new_patches if p not in current]
+
+            if not added:
+                return {"summary": f"{new_patches} は既に承認済み"}
+
+            ssm.update_patch_baseline(BaselineId=baseline_id, ApprovedPatches=current + added)
+            return {"summary": f"{added} を承認リストに追加(baseline={baseline_id})"}
+    outputs:
+      - Name: Summary
+        Selector: $.Payload.summary
+        Type: String
+  - name: RunPatchBaseline
+    action: aws:executeAwsApi
+    timeoutSeconds: 7200
+    onFailure: Abort
+    inputs:
+      Service: ssm
+      Api: SendCommand
+      DocumentName: AWS-RunPatchBaseline
+      Targets:
+        - Key: 'tag:PatchGroup'
+          Values: ['{{ TargetTagValues }}']
+      MaxConcurrency: '{{ MaxConcurrency }}'
+      MaxErrors: '{{ MaxErrors }}'
+      TimeoutSeconds: 600
+      Comment: 'install-now {{ automation:EXECUTION_ID }}'
+      Parameters:
+        Operation:
+          - Install
+        RebootOption:
+          - '{{ RebootOption }}'
+      CloudWatchOutputConfig:
+        CloudWatchOutputEnabled: true
+        CloudWatchLogGroupName: '{{ LogGroupName }}'
+    outputs:
+      - Name: CommandId
+        Selector: $.Command.CommandId
+        Type: String
+  - name: WaitForPatchCommand
+    action: aws:waitForAwsResourceProperty
+    timeoutSeconds: 7200
+    onFailure: Abort
+    inputs:
+      Service: ssm
+      Api: ListCommands
+      CommandId: '{{ RunPatchBaseline.CommandId }}'
+      PropertySelector: $.Commands[0].Status
+      DesiredValues:
+        - Success
+        - Failed
+        - Cancelled
+        - TimedOut
+  - name: AssertPatchCommandSucceeded
+    action: aws:assertAwsResourceProperty
+    onFailure: Abort
+    inputs:
+      Service: ssm
+      Api: ListCommands
+      CommandId: '{{ RunPatchBaseline.CommandId }}'
+      PropertySelector: $.Commands[0].Status
+      DesiredValues:
+        - Success
+outputs:
+  - AddApprovedPatchesIfNeeded.Summary
+  - RunPatchBaseline.CommandId

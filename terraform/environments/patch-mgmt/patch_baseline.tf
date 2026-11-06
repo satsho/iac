@@ -70,6 +70,6 @@ resource "aws_ssm_association" "patch_scan" {
 
   targets {
     key    = "tag:PatchGroup"
-    values = values(local.patch_groups)
+    values = concat(values(local.patch_groups), values(local.patch_groups_windows))
   }
 }

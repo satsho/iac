@@ -118,8 +118,8 @@ variable "maintenance_windows" {
       }
     }
     prod-weekly = {
-      description   = "prod: 毎週金曜 02:00(stgの2日後)。承認2日、stgの成功が前提、再起動は手動"
-      schedule      = "cron(0 2 ? * FRI *)"
+      description   = "検証用: ゲートの再評価確認のためat()で一時的に実行(通常は毎週金曜02:00)" # TODO: 検証後にcron(0 2 ? * FRI *)へ戻す
+      schedule      = "at(2026-11-06T20:15:00)"
       target_tags   = { Env = ["prod"], RebootPolicy = ["manual"] }
       task_type     = "AUTOMATION"
       reboot_option = "NoReboot"

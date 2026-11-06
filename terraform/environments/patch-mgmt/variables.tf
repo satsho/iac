@@ -99,15 +99,15 @@ variable "maintenance_windows" {
   }))
   default = {
     test-weekly = {
-      description   = "検証用: ゲートチェック確認のためat()で一時的に実行(通常は毎週火曜02:00)" # TODO: 検証後にcron(0 2 ? * TUE *)へ戻す
-      schedule      = "at(2026-11-06T17:23:00)"
+      description   = "test: 毎週火曜 02:00。承認0日、自動再起動"
+      schedule      = "cron(0 2 ? * TUE *)"
       target_tags   = { Env = ["test"], RebootPolicy = ["auto"] }
       task_type     = "RUN_COMMAND"
       reboot_option = "RebootIfNeeded"
     }
     stg-weekly = {
-      description   = "検証用: ゲートチェック確認のためat()で一時的に実行(通常は毎週水曜02:00)" # TODO: 検証後にcron(0 2 ? * WED *)へ戻す
-      schedule      = "at(2026-11-06T17:35:00)"
+      description   = "stg: 毎週水曜 02:00(testの1日後)。承認1日、testの成功が前提、自動再起動"
+      schedule      = "cron(0 2 ? * WED *)"
       target_tags   = { Env = ["stg"], RebootPolicy = ["auto"] }
       task_type     = "AUTOMATION"
       reboot_option = "RebootIfNeeded"

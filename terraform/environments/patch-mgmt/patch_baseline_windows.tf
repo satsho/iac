@@ -54,3 +54,27 @@ resource "aws_ssm_patch_group" "windows" {
   baseline_id = aws_ssm_patch_baseline.windows[each.key].id
   patch_group = local.patch_groups_windows[each.key]
 }
+
+# 日次スキャン(Windows分)。RHEL分(patch_baseline.tfのaws_ssm_association.patch_scan)とは
+# 別の関連付けにしている。1つのターゲットタグに指定できる値は最大5個(AWSの制限)で、
+# RHEL(4個)+Windows(3個)=7個が1つの関連付けには収まらないため。
+resource "aws_ssm_association" "patch_scan_windows" {
+  name                = "AWS-RunPatchBaseline"
+  association_name    = "${local.name}-daily-scan-windows"
+  schedule_expression = var.patch_scan_schedule
+
+  apply_only_at_cron_interval = true
+
+  max_concurrency = "100%"
+  max_errors      = "100%"
+
+  parameters = {
+    Operation    = "Scan"
+    RebootOption = "NoReboot"
+  }
+
+  targets {
+    key    = "tag:PatchGroup"
+    values = values(local.patch_groups_windows)
+  }
+}

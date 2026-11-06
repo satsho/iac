@@ -529,7 +529,7 @@ SSM のマネージドノードと RHSM の登録も一緒に解除される。
 | CloudWatch アラーム | ダッシュボードのメトリクスを使い、「prod の未適用パッチが7日以上0にならない」などを通知する | 中 |
 | Red Hat Insights(console.redhat.com) | RHSM に登録した VM の CVE・推奨対応を一覧できる(サブスクリプションに含まれる)。Patch Manager の CVE は「未適用のパッチがあるもの」だけだが、Insights は「その CVE が影響するか・修正があるか」の観点で見られる。ISO の自動登録で Insights にもつながっていれば repository / infra はそのまま使える(業務VMは仮想FWの許可リストに Insights の宛先を足す必要がある)。Amazon Inspector はオンプレの VM は対象外とみられる(要確認) | 中 |
 | AWS Config(`ec2-managedinstance-patch-compliance-status-check`) | パッチ準拠状況の**履歴**を残す。監査で「いつ時点で準拠していたか」を示せる。ハイブリッドのノードも記録できるかは要確認 | 中 |
-| Change Calendar(Systems Manager) | 年末年始などの変更凍結期間を定義し、その間はパッチ適用を止める | 中 |
+| Change Calendar(Systems Manager) | 年末年始などの変更凍結期間を定義し、その間はパッチ適用を止める。カレンダーの中身は**Terraform管理ではなく、AWSコンソールの「変更カレンダー」画面で作成・編集する**運用で検証済み(Terraform/API経由で作ったカレンダーはコンソールのGUIビルダーで編集できないため、運用者が日付を直接触れるようコンソール作成を前提にする) | 中 |
 | ~~Inventory + Resource Data Sync → Athena~~ | **実装済み**(`inventory.tf`)。全VMのパッケージ一覧を S3 に集約し、「この kernel が入っているVM」を SQL で引ける。infra上のtrivyによる脆弱性スキャンも仕込み済みだが、trivyがRHEL 10未対応のため現在は停止中(ansible/patch-mgmt/README.mdの「脆弱性スキャン」参照) | - |
 | Resource Groups | タグ条件に名前を付けて(例: `prod-app-a`)、メンテナンスウィンドウや Run Command のターゲットに使い回す | 低 |
 | 適用前の VM スナップショット | 失敗時の切り戻し手段。KVM ホストで `virsh snapshot-create-as` を取ってから当てる(家のサーバ本体も SSM 管理下なので、Run Command で実行できる) | 中 |

@@ -68,11 +68,12 @@
           <!--
             InstallToAvailablePartitionだけだと、Server系では「インストール先の選択」画面が
             確認待ちで表示されることがある(DiskConfiguration自体は自動で適用済みなのに)。
-            DiskID/PartitionIDを明示することで完全に無人化する。
+            DiskID/PartitionIDを明示することで完全に無人化する。OS本体はパーティション2
+            (下のDiskConfiguration参照。1は予約領域)。
           -->
           <InstallTo>
             <DiskID>0</DiskID>
-            <PartitionID>1</PartitionID>
+            <PartitionID>2</PartitionID>
           </InstallTo>
         </OSImage>
       </ImageInstall>
@@ -80,9 +81,19 @@
         <Disk wcm:action="add">
           <DiskID>0</DiskID>
           <WillWipeDisk>true</WillWipeDisk>
+          <!--
+            BIOS/MBRの標準構成(Microsoft公式サンプル通り): 350MBの予約領域(ブートローダ用) +
+            残り全部をOS領域にする。1パーティションだけで全領域を使う構成は、新しいWindowsの
+            ビルドだと「パーティション選択エラー」になることがあるため、この2パーティション構成にする。
+          -->
           <CreatePartitions>
             <CreatePartition wcm:action="add">
               <Order>1</Order>
+              <Type>Primary</Type>
+              <Size>350</Size>
+            </CreatePartition>
+            <CreatePartition wcm:action="add">
+              <Order>2</Order>
               <Type>Primary</Type>
               <Extend>true</Extend>
             </CreatePartition>
@@ -91,6 +102,14 @@
             <ModifyPartition wcm:action="add">
               <Order>1</Order>
               <PartitionID>1</PartitionID>
+              <Format>NTFS</Format>
+              <Label>System Reserved</Label>
+              <Active>true</Active>
+              <TypeID>0x27</TypeID>
+            </ModifyPartition>
+            <ModifyPartition wcm:action="add">
+              <Order>2</Order>
+              <PartitionID>2</PartitionID>
               <Format>NTFS</Format>
               <Label>Windows</Label>
               <Letter>C</Letter>

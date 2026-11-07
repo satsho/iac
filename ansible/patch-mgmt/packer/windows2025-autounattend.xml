@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Windows Server 2025 Evaluation(ja-jp、build 26100)の無人インストール用応答ファイル。
+  RHELのkickstartに相当する。Index=2 は「Standard Edition, Desktop Experience」
+  (wimlib/7zで確認したinstall.wimのインデックス1〜4のうち、GUIありのStandard)。
+
+  ディスクはSATA(virt-installでbus=sata)、NICだけvirtio(model=virtio)にする。
+  SATAはWinPEが追加ドライバなしで認識できるため。NICのMAC(52:54:00:15:01:24)と
+  固定IP(192.168.151.24、patch-workloadネットワーク)はvars.ymlのRHEL機(patch-test
+  等)と同じ採番規則の続き(.21/.22/.23の次の.24)。別のIPに変えた場合は、下の
+  Microsoft-Windows-TCPIP/DNS-Clientブロックも合わせて書き換えること。
+
+  使い方:
+    1. ADMIN_PASSWORD_PLACEHOLDER を実際のパスワードに置き換えたコピーを作る
+       (このファイル自体は置き換えずコミットしない。置き換えたコピーは.gitignore対象のディレクトリに置く)
+    2. そのコピーを autounattend.xml という名前にして、小さなISOに固める:
+         genisoimage -o /var/lib/libvirt/images/windows2025-seed.iso -relaxed-filenames -J -R autounattend.xml
+    3. virt-install で、Windows ISO・virtio-win.iso・このseed ISOの3枚をCD-ROMとして渡す
+-->
+<unattend xmlns="urn:schemas-microsoft-com:unattend">
+
+  <settings pass="windowsPE">
+    <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <SetupUILanguage>
+        <UILanguage>ja-JP</UILanguage>
+      </SetupUILanguage>
+      <InputLocale>ja-JP</InputLocale>
+      <SystemLocale>ja-JP</SystemLocale>
+      <UILanguage>ja-JP</UILanguage>
+      <UserLocale>ja-JP</UserLocale>
+    </component>
+    <component name="Microsoft-Windows-PnpCustomizationsWinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <!--
+        virt-installでディスクはSATA(bus=sata)にしているのでviostor等は不要。
+        NICだけvirtio(model=virtio)にしているので、WinPEの時点でNetKVMドライバを
+        読ませる。virtio-win.isoを2枚目のCD-ROMとして付けるが、WinPE内のドライブ
+        レター(D/E/F)は環境によって変わるため3通り並べている。見つからなくても
+        インストール自体は失敗せず、後からデバイスマネージャーで手動導入すればよい。
+      -->
+      <DriverPaths>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="1">
+          <Path>D:\NetKVM\2k22\amd64</Path>
+        </PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="2">
+          <Path>E:\NetKVM\2k22\amd64</Path>
+        </PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="3">
+          <Path>F:\NetKVM\2k22\amd64</Path>
+        </PathAndCredentials>
+      </DriverPaths>
+    </component>
+    <component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <UserData>
+        <AcceptEula>true</AcceptEula>
+        <ProductKey>
+          <!-- 評価版はプロダクトキー不要。空のままでよい -->
+          <WillShowUI>Never</WillShowUI>
+        </ProductKey>
+      </UserData>
+      <ImageInstall>
+        <OSImage>
+          <InstallFrom>
+            <MetaData wcm:action="add">
+              <Key>/IMAGE/INDEX</Key>
+              <Value>2</Value>
+            </MetaData>
+          </InstallFrom>
+          <InstallToAvailablePartition>true</InstallToAvailablePartition>
+        </OSImage>
+      </ImageInstall>
+      <DiskConfiguration>
+        <Disk wcm:action="add">
+          <DiskID>0</DiskID>
+          <WillWipeDisk>true</WillWipeDisk>
+          <CreatePartitions>
+            <CreatePartition wcm:action="add">
+              <Order>1</Order>
+              <Type>Primary</Type>
+              <Extend>true</Extend>
+            </CreatePartition>
+          </CreatePartitions>
+          <ModifyPartitions>
+            <ModifyPartition wcm:action="add">
+              <Order>1</Order>
+              <PartitionID>1</PartitionID>
+              <Format>NTFS</Format>
+              <Label>Windows</Label>
+              <Letter>C</Letter>
+            </ModifyPartition>
+          </ModifyPartitions>
+        </Disk>
+      </DiskConfiguration>
+    </component>
+  </settings>
+
+  <settings pass="specialize">
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <ComputerName>patch-test-win</ComputerName>
+      <TimeZone>Tokyo Standard Time</TimeZone>
+    </component>
+    <!--
+      patch-workloadネットワーク(vars.ymlのlibvirt_networks)の規約に合わせた固定IP。
+      RHEL側(static-nic.nmconnection.j2)と同じ考え方: gateway/dnsともネットワークの
+      アドレス(192.168.151.1、libvirtのdnsmasq)。MACアドレスでNICを指定する
+      (Identifierはダッシュ区切り)。virt-installで渡すMACと必ず一致させること。
+    -->
+    <component name="Microsoft-Windows-TCPIP" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <Interfaces>
+        <Interface wcm:action="add">
+          <Identifier>52-54-00-15-01-24</Identifier>
+          <Ipv4Settings>
+            <DhcpEnabled>false</DhcpEnabled>
+          </Ipv4Settings>
+          <UnicastIpAddresses>
+            <IpAddress wcm:action="add" wcm:keyValue="1">192.168.151.24/24</IpAddress>
+          </UnicastIpAddresses>
+          <Routes>
+            <Route wcm:action="add">
+              <Identifier>1</Identifier>
+              <Prefix>0.0.0.0/0</Prefix>
+              <NextHopAddress>192.168.151.1</NextHopAddress>
+              <Metric>10</Metric>
+            </Route>
+          </Routes>
+        </Interface>
+      </Interfaces>
+    </component>
+    <component name="Microsoft-Windows-DNS-Client" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <Interfaces>
+        <Interface wcm:action="add">
+          <Identifier>52-54-00-15-01-24</Identifier>
+          <DNSServerSearchOrder>
+            <IpAddress wcm:action="add" wcm:keyValue="1">192.168.151.1</IpAddress>
+          </DNSServerSearchOrder>
+        </Interface>
+      </Interfaces>
+    </component>
+  </settings>
+
+  <settings pass="oobeSystem">
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <OOBE>
+        <HideEULAPage>true</HideEULAPage>
+        <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
+        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+        <NetworkLocation>Work</NetworkLocation>
+        <ProtectYourPC>3</ProtectYourPC>
+        <SkipMachineOOBE>true</SkipMachineOOBE>
+        <SkipUserOOBE>true</SkipUserOOBE>
+      </OOBE>
+      <UserAccounts>
+        <AdministratorPassword>
+          <Value>ADMIN_PASSWORD_PLACEHOLDER</Value>
+          <PlainText>true</PlainText>
+        </AdministratorPassword>
+      </UserAccounts>
+      <AutoLogon>
+        <Password>
+          <Value>ADMIN_PASSWORD_PLACEHOLDER</Value>
+          <PlainText>true</PlainText>
+        </Password>
+        <Enabled>true</Enabled>
+        <LogonCount>3</LogonCount>
+        <Username>Administrator</Username>
+      </AutoLogon>
+      <!--
+        RHELのSSH鍵相当: OpenSSH Serverを有効化し、SSM Agentインストール・
+        Hybrid Activation登録まで自動で行う。RDP・SSHともファイアウォールで許可する。
+      -->
+      <FirstLogonCommands>
+        <SynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0"</CommandLine>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Service sshd; Set-Service -Name sshd -StartupType Automatic"</CommandLine>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>3</Order>
+          <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "New-NetFirewallRule -Name sshd -DisplayName 'OpenSSH Server (sshd)' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22"</CommandLine>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>4</Order>
+          <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Value 0; Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'"</CommandLine>
+        </SynchronousCommand>
+      </FirstLogonCommands>
+    </component>
+    <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <InputLocale>ja-JP</InputLocale>
+      <SystemLocale>ja-JP</SystemLocale>
+      <UILanguage>ja-JP</UILanguage>
+      <UserLocale>ja-JP</UserLocale>
+    </component>
+  </settings>
+
+</unattend>

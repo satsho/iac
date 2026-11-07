@@ -65,7 +65,15 @@
               <Value>2</Value>
             </MetaData>
           </InstallFrom>
-          <InstallToAvailablePartition>true</InstallToAvailablePartition>
+          <!--
+            InstallToAvailablePartitionだけだと、Server系では「インストール先の選択」画面が
+            確認待ちで表示されることがある(DiskConfiguration自体は自動で適用済みなのに)。
+            DiskID/PartitionIDを明示することで完全に無人化する。
+          -->
+          <InstallTo>
+            <DiskID>0</DiskID>
+            <PartitionID>1</PartitionID>
+          </InstallTo>
         </OSImage>
       </ImageInstall>
       <DiskConfiguration>

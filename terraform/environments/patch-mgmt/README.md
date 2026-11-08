@@ -323,6 +323,18 @@ aws ssm start-automation-execution \
 
 なお、再起動待ちが残ったサーバに `RebootIfNeeded` で次のパッチ適用を行うと、そのときに再起動される。
 
+Windows VMには `iac-poc-patch-RebootAndScanWindows` を使う(中身は同じ「再起動→スキャン」だが、
+再起動を継続扱いにする終了コードがRHEL版(`AWS-RunShellScript`、終了コード194)とは異なる
+(`AWS-RunPowerShellScript`、終了コード3010 = `ERROR_SUCCESS_REBOOT_REQUIRED`)。
+
+```bash
+aws ssm start-automation-execution \
+  --document-name iac-poc-patch-RebootAndScanWindows \
+  --targets Key=tag:Os,Values=Windows-2025 \
+  --target-parameter-name InstanceId \
+  --max-concurrency 1 --max-errors 0
+```
+
 ## 早く当てたい・緊急パッチ(`InstallNow`)
 
 メンテナンスウィンドウ(スケジュール)やゲート(前段の成功確認)を待たずに当てたいときに使う。

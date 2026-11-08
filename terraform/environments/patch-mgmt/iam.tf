@@ -117,13 +117,14 @@ resource "aws_iam_role_policy" "patch_automation" {
     Version = "2012-10-17"
     Statement = [
       {
-        # 実行できるコマンドはパッチ適用と(手動再起動Runbook用の)シェルだけに絞る
+        # 実行できるコマンドはパッチ適用と(手動再起動Runbook用の)シェル/PowerShellだけに絞る
         Sid    = "RunPatchCommands"
         Effect = "Allow"
         Action = "ssm:SendCommand"
         Resource = [
           "arn:aws:ssm:${var.aws_region}::document/AWS-RunPatchBaseline",
           "arn:aws:ssm:${var.aws_region}::document/AWS-RunShellScript",
+          "arn:aws:ssm:${var.aws_region}::document/AWS-RunPowerShellScript",
           "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:managed-instance/*",
         ]
       },

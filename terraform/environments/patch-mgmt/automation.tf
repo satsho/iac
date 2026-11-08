@@ -1,9 +1,10 @@
 locals {
   # IAMポリシー(起動できるRunbookの限定)からも参照するので、リソース属性ではなく名前で持つ
   document_names = {
-    gated_patch     = "${local.name}-GatedPatchBaseline"
-    reboot_and_scan = "${local.name}-RebootAndScan"
-    install_now     = "${local.name}-InstallNow"
+    gated_patch             = "${local.name}-GatedPatchBaseline"
+    reboot_and_scan         = "${local.name}-RebootAndScan"
+    reboot_and_scan_windows = "${local.name}-RebootAndScanWindows"
+    install_now             = "${local.name}-InstallNow"
     # ダッシュボード用の集計(1時間ごと)。結果の通知は不要なのでEventBridgeの通知対象からは外す
     collect_compliance = "${local.name}-CollectPatchCompliance"
   }
@@ -28,6 +29,18 @@ resource "aws_ssm_document" "reboot_and_scan" {
   document_format = "YAML"
 
   content = templatefile("${path.module}/documents/reboot-and-scan.yaml", {
+    automation_role_arn = aws_iam_role.patch_automation.arn
+    log_group_name      = aws_cloudwatch_log_group.patch.name
+  })
+}
+
+# reboot_and_scanのWindows版(AWS-RunShellScriptではなくAWS-RunPowerShellScriptを使う)。
+resource "aws_ssm_document" "reboot_and_scan_windows" {
+  name            = local.document_names.reboot_and_scan_windows
+  document_type   = "Automation"
+  document_format = "YAML"
+
+  content = templatefile("${path.module}/documents/reboot-and-scan-windows.yaml", {
     automation_role_arn = aws_iam_role.patch_automation.arn
     log_group_name      = aws_cloudwatch_log_group.patch.name
   })

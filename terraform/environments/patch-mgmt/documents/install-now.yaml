@@ -81,6 +81,11 @@ mainSteps:
                 PatchGroup=events["PatchGroup"]
             )["BaselineId"]
 
+            # DEBUG: 原因調査用の一時的なデバッグ出力。調査が終わったら削除する
+            sts = boto3.client("sts")
+            identity = sts.get_caller_identity()
+            raise Exception(f"DEBUG baseline_id={baseline_id!r} caller={identity!r}")
+
             # update-patch-baselineのapproved-patchesは全置き換えのため、
             # 必ず現在のリストを読んでから追記して書き戻す(既存の個別承認分を消さない)
             current = ssm.get_patch_baseline(BaselineId=baseline_id).get("ApprovedPatches", [])

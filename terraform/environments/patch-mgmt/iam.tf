@@ -117,13 +117,14 @@ resource "aws_iam_role_policy" "patch_automation" {
     Version = "2012-10-17"
     Statement = [
       {
-        # 実行できるコマンドはパッチ適用と(手動再起動Runbook用の)シェルだけに絞る
+        # 実行できるコマンドはパッチ適用と(手動再起動Runbook用の)シェル/PowerShellだけに絞る
         Sid    = "RunPatchCommands"
         Effect = "Allow"
         Action = "ssm:SendCommand"
         Resource = [
           "arn:aws:ssm:${var.aws_region}::document/AWS-RunPatchBaseline",
           "arn:aws:ssm:${var.aws_region}::document/AWS-RunShellScript",
+          "arn:aws:ssm:${var.aws_region}::document/AWS-RunPowerShellScript",
           "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:managed-instance/*",
         ]
       },
@@ -143,6 +144,17 @@ resource "aws_iam_role_policy" "patch_automation" {
           "ssm:DescribeMaintenanceWindowExecutions",
           "ssm:GetAutomationExecution",
           "ssm:ListTagsForResource",
+        ]
+        Resource = "*"
+      },
+      {
+        # install-now(早く当てたい/緊急時)が、承認リストへ個別に追記するための権限
+        Sid    = "UpdateApprovedPatches"
+        Effect = "Allow"
+        Action = [
+          "ssm:GetPatchBaseline",
+          "ssm:GetPatchBaselineForPatchGroup",
+          "ssm:UpdatePatchBaseline",
         ]
         Resource = "*"
       },
@@ -187,13 +199,6 @@ resource "aws_iam_role_policy" "patch_automation" {
         Condition = {
           StringEquals = { "iam:PassedToService" = "ssm.amazonaws.com" }
         }
-      },
-      {
-        # 緊急パッチRunbookの承認依頼(aws:approve)の通知
-        Sid      = "NotifyApprovers"
-        Effect   = "Allow"
-        Action   = "sns:Publish"
-        Resource = aws_sns_topic.patch.arn
       },
     ]
   })

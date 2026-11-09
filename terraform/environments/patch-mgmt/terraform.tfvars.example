@@ -2,9 +2,6 @@
 
 notification_email = "you@example.com"
 
-# 緊急パッチRunbookの承認者のデフォルト
-emergency_approvers = ["arn:aws:iam::123456789012:role/your-admin-role"]
-
 # --- 例: アプリ単位でメンテナンスウィンドウを分ける -------------------------------
 # VM側(ansible/patch-mgmt/vars.yml)に App=app-b のVMを足したうえで、ウィンドウを追加する。
 # maintenance_windows = {
@@ -27,10 +24,19 @@ emergency_approvers = ["arn:aws:iam::123456789012:role/your-admin-role"]
 #   mgmt = { approve_after_days = 0 }
 # }
 
-# --- 例: 緊急パッチ(承認待ち日数を飛ばして特定のアドバイザリを承認する) -----------
+# --- 緊急で早く当てたい場合は、ここ(variables.tf)を編集するのではなく --------------
+# iac-poc-patch-InstallNow(README参照)をAWS CLI/コンソールから実行する。
+# approved_patchesはlifecycle.ignore_changesの対象なので、ここに書いても
+# 初期値としてしか使われず、以後のapplyでは反映されない(InstallNowがAPIで直接更新する)。
+
+# --- 例: ゲートチェックの動きを素早く確認したい場合(検証用、本番運用では戻すこと) ---
+# 承認日数を全部0日にしておくと、承認のタイミングを気にせずゲート(前段の成功確認)の
+# 挙動だけに集中して検証できる。test-weekly/stg-weeklyのscheduleを一時的に
+# at(2026-01-01T15:00:00)のような一回限りの指定に変えて数分おきに自前で起動すると、
+# 定期ウィンドウを待たずにゲートの通過/失敗を確認できる(README「構築手順」参照)。
 # patch_baselines = {
-#   test = { approve_after_days = 0, approved_patches = ["RHSA-2026:12345"] }
-#   stg  = { approve_after_days = 1, approved_patches = ["RHSA-2026:12345"] }
-#   prod = { approve_after_days = 2, approved_patches = ["RHSA-2026:12345"] }
+#   test = { approve_after_days = 0 }
+#   stg  = { approve_after_days = 0 }
+#   prod = { approve_after_days = 0 }
 #   mgmt = { approve_after_days = 0 }
 # }

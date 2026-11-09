@@ -1,0 +1,59 @@
+schemaVersion: '0.3'
+description: |-
+  手動再起動パターン用(Windows版)。RebootIfNeededでパッチを適用して「再起動待ち
+  (InstalledPendingReboot)」になっているインスタンスを再起動し、再起動後にスキャンして
+  コンプライアンスを最新にする。reboot-and-scan.yaml(RHEL/AWS-RunShellScript版)の
+  Windows版。仕組みは同じだが、再起動を継続扱いにする終了コードがRHEL(194)とは異なる
+  (Windowsは3010 = ERROR_SUCCESS_REBOOT_REQUIRED)。
+assumeRole: '{{ AutomationAssumeRole }}'
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: このRunbookが引き受けるIAMロールのARN
+    default: ${automation_role_arn}
+  InstanceId:
+    type: String
+    description: 再起動するインスタンスID
+  LogGroupName:
+    type: String
+    description: Run Commandの出力先ロググループ
+    default: ${log_group_name}
+mainSteps:
+  - name: Reboot
+    action: aws:runCommand
+    timeoutSeconds: 1800
+    onFailure: Abort
+    inputs:
+      DocumentName: AWS-RunPowerShellScript
+      InstanceIds:
+        - '{{ InstanceId }}'
+      Parameters:
+        commands:
+          - |
+            # 終了コード3010を返すと、SSM Agentがインスタンスを再起動し、起動後にこの
+            # スクリプトをもう一度実行する(RHEL版の194と同じ役割)。2回目は目印ファイルが
+            # あるので再起動せずに終わる。
+            $marker = "$env:SystemRoot\Temp\patch-reboot.marker"
+            if (-not (Test-Path $marker)) {
+                New-Item -Path $marker -ItemType File -Force | Out-Null
+                exit 3010
+            }
+            Remove-Item -Path $marker -Force
+            (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
+      CloudWatchOutputConfig:
+        CloudWatchOutputEnabled: true
+        CloudWatchLogGroupName: '{{ LogGroupName }}'
+  - name: ScanAfterReboot
+    action: aws:runCommand
+    timeoutSeconds: 1800
+    onFailure: Abort
+    inputs:
+      DocumentName: AWS-RunPatchBaseline
+      InstanceIds:
+        - '{{ InstanceId }}'
+      Parameters:
+        Operation: Scan
+        RebootOption: NoReboot
+      CloudWatchOutputConfig:
+        CloudWatchOutputEnabled: true
+        CloudWatchLogGroupName: '{{ LogGroupName }}'

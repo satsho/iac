@@ -46,3 +46,13 @@ output "inventory_glue_database" {
   description = "AthenaでクエリするGlueデータベース名。QuickSightのデータソースにもこれを指定する"
   value       = aws_glue_catalog_database.patch_mgmt.name
 }
+
+output "grafana_athena_role_arn" {
+  description = "GrafanaのAthenaデータソース設定(Assume Role ARN)に指定するロール"
+  value       = aws_iam_role.grafana_athena.arn
+}
+
+output "grafana_athena_workgroup" {
+  description = "GrafanaのAthenaデータソース設定(Workgroup)に指定する"
+  value       = aws_athena_workgroup.patch_mgmt.name
+}

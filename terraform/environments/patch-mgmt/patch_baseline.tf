@@ -33,6 +33,13 @@ resource "aws_ssm_patch_baseline" "rhel" {
       values = each.value.severities
     }
   }
+
+  # approved_patchesは、install-now(documents/install-now.yaml)がupdate-patch-baseline APIで
+  # 直接書き換える対象。Terraformが元のvariables.tfの値に巻き戻してしまわないよう、
+  # ここだけ差分検知の対象から外す(初期値はvariables.tfのdefaultで与える)。
+  lifecycle {
+    ignore_changes = [approved_patches]
+  }
 }
 
 resource "aws_ssm_patch_group" "rhel" {
@@ -44,6 +51,8 @@ resource "aws_ssm_patch_group" "rhel" {
 
 # スキャン(不足パッチの検出とコンプライアンス報告)は、インストールとは分けてState Managerで毎日行う。
 # メンテナンスウィンドウのゲートチェックや、Patch Managerのダッシュボードはこの結果を見る。
+# 1つのターゲットタグに指定できる値は最大5個(AWSの制限)なので、RHEL/Windowsで
+# 関連付け自体を分けている(OSが増えるたびに、片方が5個を超えたらさらに分割する)。
 resource "aws_ssm_association" "patch_scan" {
   name                = "AWS-RunPatchBaseline"
   association_name    = "${local.name}-daily-scan"

@@ -354,7 +354,7 @@ aws ssm start-automation-execution \
 挟まない。実行できるかどうかは IAM 権限だけで制御する。
 
 ```bash
-# 例: すでに承認済みのパッチを、すぐprodに当てたい
+# 例: すでに承認済みのパッチを、すぐprodに当てたい(PatchGroup全体)
 aws ssm start-automation-execution \
   --document-name iac-poc-patch-InstallNow \
   --parameters 'TargetTagValues=rhel10-prod'
@@ -363,11 +363,24 @@ aws ssm start-automation-execution \
 aws ssm start-automation-execution \
   --document-name iac-poc-patch-InstallNow \
   --parameters 'TargetTagValues=rhel10-test,AddApprovedPatches=RHSA-2026:12345'
+
+# 例: カナリア的にprodの1台だけ先に当てて様子を見たい(TargetTagValuesは省略可)
+aws ssm start-automation-execution \
+  --document-name iac-poc-patch-InstallNow \
+  --parameters 'InstanceId=mi-xxxxxxxxxxxxxxxxx'
 ```
 
+`InstanceId` を指定すると `TargetTagValues` より優先され、その1台だけが対象になる。
+承認リストへの追記(`AddApprovedPatches`)と併用する場合は、どのベースラインを更新するか
+特定するために `TargetTagValues` も指定すること(承認はPatchGroup=ベースライン単位の
+概念で、インスタンス単位では存在しないため)。
+
 コンソールから実行する場合は、Systems Manager → 変更管理 → オートメーション →
-`iac-poc-patch-InstallNow` を選択して「実行」。`TargetTagValues` はプルダウン選択、
-`AddApprovedPatches` は正規表現(`RHSA-YYYY:NNNNN`)でのバリデーション付き。
+`iac-poc-patch-InstallNow` を選択して「実行」。「シンプルな実行」で `InstanceId` に
+直接インスタンスIDを入力すれば1台だけに絞れる。複数台へ同時実行数・失敗許容数を
+制御しながら流したい場合は「レート制御実行」を選び、ターゲットパラメータ名に
+`InstanceId` を指定する。`TargetTagValues` はプルダウン選択、`AddApprovedPatches` は
+正規表現(`RHSA-YYYY:NNNNN`)でのバリデーション付き。
 
 「どのパッチが入る予定か」を事前に確認したい場合は、実行前に **フリートマネージャー →
 対象ノード → パッチタブ → Missing でフィルタ** すると、CVE 付きで確認できる(全VM分を

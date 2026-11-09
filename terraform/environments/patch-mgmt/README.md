@@ -308,14 +308,14 @@ test を経由せずに入ってしまう。これを防ぐ方法は2つある�
 | 自動 | `RebootOption = RebootIfNeeded` | 必要なら Patch Manager が再起動し、再起動後のスキャンまで自動で行う |
 | 手動 | `RebootOption = NoReboot` | パッケージは入るが **InstalledPendingReboot(再起動待ち)** になり、コンプライアンス上は非準拠のまま |
 
-手動パターンの再起動は `RebootAndScan` Runbook で行う。`virsh reboot` や VM の中で再起動しただけだと、
+手動パターンの再起動は `RebootAndScanRhel` Runbook で行う。`virsh reboot` や VM の中で再起動しただけだと、
 次のスキャン(翌日 01:30)まで Patch Manager 上は再起動待ちのまま残り、次のステージの
 ゲートも通らない。Runbook は「再起動 → スキャン」までまとめて行う。
 
 ```bash
 # prodを1台ずつ再起動する(タグで対象を選び、同時実行1台・1台でも失敗したら止める)
 aws ssm start-automation-execution \
-  --document-name iac-poc-patch-RebootAndScan \
+  --document-name iac-poc-patch-RebootAndScanRhel \
   --targets Key=tag:Env,Values=prod \
   --target-parameter-name InstanceId \
   --max-concurrency 1 --max-errors 0

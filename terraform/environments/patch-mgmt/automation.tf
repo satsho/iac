@@ -2,7 +2,7 @@ locals {
   # IAMポリシー(起動できるRunbookの限定)からも参照するので、リソース属性ではなく名前で持つ
   document_names = {
     gated_patch             = "${local.name}-GatedPatchBaseline"
-    reboot_and_scan         = "${local.name}-RebootAndScan"
+    reboot_and_scan_rhel    = "${local.name}-RebootAndScanRhel"
     reboot_and_scan_windows = "${local.name}-RebootAndScanWindows"
     install_now             = "${local.name}-InstallNow"
     # ダッシュボード用の集計(1時間ごと)。結果の通知は不要なのでEventBridgeの通知対象からは外す
@@ -23,8 +23,8 @@ resource "aws_ssm_document" "gated_patch" {
 }
 
 # 手動再起動パターン用。運用者が好きなタイミングで実行し、再起動後にスキャンしてコンプライアンスを更新する。
-resource "aws_ssm_document" "reboot_and_scan" {
-  name            = local.document_names.reboot_and_scan
+resource "aws_ssm_document" "reboot_and_scan_rhel" {
+  name            = local.document_names.reboot_and_scan_rhel
   document_type   = "Automation"
   document_format = "YAML"
 
@@ -34,7 +34,7 @@ resource "aws_ssm_document" "reboot_and_scan" {
   })
 }
 
-# reboot_and_scanのWindows版(AWS-RunShellScriptではなくAWS-RunPowerShellScriptを使う)。
+# reboot_and_scan_rhelのWindows版(AWS-RunShellScriptではなくAWS-RunPowerShellScriptを使う)。
 resource "aws_ssm_document" "reboot_and_scan_windows" {
   name            = local.document_names.reboot_and_scan_windows
   document_type   = "Automation"

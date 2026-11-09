@@ -98,7 +98,6 @@ resource "aws_iam_role_policy" "grafana_athena" {
           "athena:StopQueryExecution",
           "athena:GetWorkGroup",
           "athena:ListQueryExecutions",
-          "athena:ListDataCatalogs",
           "athena:ListDatabases",
           "athena:GetDatabase",
           "athena:ListTableMetadata",
@@ -108,6 +107,17 @@ resource "aws_iam_role_policy" "grafana_athena" {
           aws_athena_workgroup.patch_mgmt.arn,
           "arn:aws:athena:${var.aws_region}:${data.aws_caller_identity.current.account_id}:datacatalog/AwsDataCatalog",
         ]
+      },
+      {
+        # 列挙系(List)APIはカタログ/ワークグループ単位のARNに絞れず、
+        # 常にResource="*"が必要(AWSの仕様)。
+        Sid    = "ListAthenaResources"
+        Effect = "Allow"
+        Action = [
+          "athena:ListDataCatalogs",
+          "athena:ListWorkGroups",
+        ]
+        Resource = "*"
       },
       {
         Sid    = "ReadGlueCatalog"

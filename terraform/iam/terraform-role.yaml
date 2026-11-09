@@ -172,6 +172,13 @@ Resources:
                 Action:
                   - glue:*
                 Resource: '*'
+              # Grafana(rancher上)からAthena経由でInventoryを見るためのワークグループ作成用
+              # (environments/patch-mgmt/grafana.tf)。
+              - Sid: AthenaBroad
+                Effect: Allow
+                Action:
+                  - athena:*
+                Resource: '*'
               # 日時指定公開テスト用(environments/timed-release)。
               - Sid: CloudFrontBroad
                 Effect: Allow

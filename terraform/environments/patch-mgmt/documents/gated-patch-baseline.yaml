@@ -7,6 +7,9 @@ description: |-
   ゲート条件(GateWindowIdsが空なら確認しない):
     1. 前段のメンテナンスウィンドウが、直近 GateMaxAgeHours 時間以内に SUCCESS で終わっている
     2. 前段のパッチグループのインスタンスに、適用失敗(Failed)と再起動待ち(InstalledPendingReboot)が残っていない
+
+  加えて、ChangeCalendarNamesが指定されていれば、変更カレンダーがOPENであることも確認する
+  (CLOSEDなら中止。カレンダー自体はAWSコンソールの「変更カレンダー」画面で作成・編集する運用)。
 assumeRole: '{{ AutomationAssumeRole }}'
 parameters:
   AutomationAssumeRole:
@@ -35,6 +38,12 @@ parameters:
     type: Integer
     description: 前段のメンテナンスウィンドウの実行を何時間前まで有効とみなすか
     default: 72
+  ChangeCalendarNames:
+    type: StringList
+    description: >-
+      (任意)確認する変更カレンダー名(複数可)。1つでもCLOSEDなら中止する。
+      空ならこのチェックは行わない
+    default: []
   LogGroupName:
     type: String
     description: Run Commandの出力先ロググループ
@@ -51,6 +60,7 @@ mainSteps:
         WindowIds: '{{ GateWindowIds }}'
         PatchGroups: '{{ GatePatchGroups }}'
         MaxAgeHours: '{{ GateMaxAgeHours }}'
+        ChangeCalendarNames: '{{ ChangeCalendarNames }}'
       Script: |-
         import datetime
 
@@ -62,8 +72,15 @@ mainSteps:
             window_ids = [w for w in events["WindowIds"].split(",") if w]
             patch_groups = [g for g in events["PatchGroups"].split(",") if g]
             max_age_hours = int(events["MaxAgeHours"])
+            calendar_names = [c for c in events["ChangeCalendarNames"] if c]
             since = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=max_age_hours)
             problems = []
+
+            # 0. 変更カレンダーがOPENか(1つでもCLOSEDなら中止)
+            if calendar_names:
+                state = ssm.get_calendar_state(CalendarNames=calendar_names)
+                if state["State"] != "OPEN":
+                    problems.append(f"変更カレンダー{calendar_names}が{state['State']}")
 
             # 1. 前段のメンテナンスウィンドウが直近で成功しているか
             for window_id in window_ids:

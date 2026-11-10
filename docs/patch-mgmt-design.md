@@ -295,6 +295,23 @@ Operation=Scan)で、マーカーファイルのロジックとは無関係。
 運用に決定した(「コンソールからじゃないと運用者が使うの難しい」という
 操作性要件を優先)。
 
+カレンダーの中身(OPEN/CLOSED期間)だけでは、何かに紐付けない限りパッチ
+適用は止まらない。AWSの標準的な連携方法は2通り。
+
+- **State Managerの関連付け**: コンソールの編集画面にネイティブな
+  「変更カレンダー」項目があり、選ぶだけで連携できる(コード不要)。
+  本プロジェクトの日次スキャン等に使う場合はこちらで足りる
+- **メンテナンスウィンドウ**: ネイティブな連携機能が無いため、
+  `GatedPatchBaseline`(`documents/gated-patch-baseline.yaml`)の
+  `CheckPreviousStage`ステップに、`ChangeCalendarNames`パラメータで
+  指定したカレンダーが`GetCalendarState`でOPENかを確認する処理を追加して
+  いる(1つでもCLOSEDなら中止)。全6ウィンドウがこの仕組みを使えるよう、
+  ゲートを持たないtest系(`test-weekly`/`test-monthly-win`)も
+  `task_type`を`RUN_COMMAND`から`AUTOMATION`(ゲート設定は無し)に変更
+  している。各ウィンドウの`change_calendars`(`variables.tf`の
+  `maintenance_windows`)にカレンダー名を指定するだけで有効化できる
+  (未指定ならチェックしない)
+
 ## 11. 可視性・通知
 
 | 手段 | 内容 |

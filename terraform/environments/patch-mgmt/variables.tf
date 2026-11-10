@@ -106,18 +106,21 @@ variable "maintenance_windows" {
     reboot_option   : RebootIfNeeded(自動再起動) / NoReboot(再起動は手動)
     gate            : AUTOMATIONのみ。前段ステージのウィンドウが直近 max_age_hours 以内に成功しており、
                       前段パッチグループに失敗・再起動待ちが残っていなければ実行する
+    change_calendars: AUTOMATIONのみ。指定した変更カレンダー(AWSコンソールの「変更カレンダー」画面で
+                      作成・編集する運用)が1つでもCLOSEDなら実行しない。省略すれば確認しない
   EOT
   type = map(object({
-    description     = string
-    schedule        = string
-    duration_hours  = optional(number, 3)
-    cutoff_hours    = optional(number, 1)
-    enabled         = optional(bool, true)
-    target_tags     = map(list(string))
-    task_type       = string
-    reboot_option   = optional(string, "RebootIfNeeded")
-    max_concurrency = optional(string, "1")
-    max_errors      = optional(string, "0")
+    description      = string
+    schedule         = string
+    duration_hours   = optional(number, 3)
+    cutoff_hours     = optional(number, 1)
+    enabled          = optional(bool, true)
+    target_tags      = map(list(string))
+    task_type        = string
+    reboot_option    = optional(string, "RebootIfNeeded")
+    max_concurrency  = optional(string, "1")
+    max_errors       = optional(string, "0")
+    change_calendars = optional(list(string))
     gate = optional(object({
       windows       = list(string)
       patch_groups  = list(string)
@@ -126,10 +129,11 @@ variable "maintenance_windows" {
   }))
   default = {
     test-weekly = {
-      description   = "test: 毎週火曜 02:00。承認0日、自動再起動"
-      schedule      = "cron(0 2 ? * TUE *)"
-      target_tags   = { Env = ["test"], RebootPolicy = ["auto"] }
-      task_type     = "RUN_COMMAND"
+      description = "test: 毎週火曜 02:00。承認0日、自動再起動"
+      schedule    = "cron(0 2 ? * TUE *)"
+      target_tags = { Env = ["test"], RebootPolicy = ["auto"] }
+      # ゲートは無いが、変更カレンダーのチェックのためAUTOMATION(GatedPatchBaseline、gate未設定)を使う
+      task_type     = "AUTOMATION"
       reboot_option = "RebootIfNeeded"
     }
     stg-weekly = {
@@ -158,10 +162,11 @@ variable "maintenance_windows" {
     }
     # Windows(Patch Tuesday起点の月次サイクル。RHELの週次とは別系統)
     test-monthly-win = {
-      description   = "Windows test: 第3火曜 02:00(Patch Tuesday=第2火曜の1週間後)。承認0日、自動再起動"
-      schedule      = "cron(0 2 ? * TUE#3 *)"
-      target_tags   = { Env = ["test"], Os = ["Windows-2025"], RebootPolicy = ["auto"] }
-      task_type     = "RUN_COMMAND"
+      description = "Windows test: 第3火曜 02:00(Patch Tuesday=第2火曜の1週間後)。承認0日、自動再起動"
+      schedule    = "cron(0 2 ? * TUE#3 *)"
+      target_tags = { Env = ["test"], Os = ["Windows-2025"], RebootPolicy = ["auto"] }
+      # ゲートは無いが、変更カレンダーのチェックのためAUTOMATION(GatedPatchBaseline、gate未設定)を使う
+      task_type     = "AUTOMATION"
       reboot_option = "RebootIfNeeded"
     }
     stg-monthly-win = {
@@ -203,6 +208,11 @@ variable "maintenance_windows" {
   validation {
     condition     = alltrue([for w in values(var.maintenance_windows) : w.gate == null || w.task_type == "AUTOMATION"])
     error_message = "gate は task_type = AUTOMATION のウィンドウでのみ使えます。"
+  }
+
+  validation {
+    condition     = alltrue([for w in values(var.maintenance_windows) : w.change_calendars == null || w.task_type == "AUTOMATION"])
+    error_message = "change_calendars は task_type = AUTOMATION のウィンドウでのみ使えます。"
   }
 }
 

@@ -16,6 +16,9 @@ locals {
         GatePatchGroups = [join(",", w.gate.patch_groups)]
         GateMaxAgeHours = [tostring(w.gate.max_age_hours)]
       },
+      w.change_calendars == null ? {} : {
+        ChangeCalendarNames = w.change_calendars
+      },
     )
   }
 }

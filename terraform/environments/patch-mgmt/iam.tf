@@ -144,6 +144,7 @@ resource "aws_iam_role_policy" "patch_automation" {
           "ssm:DescribeMaintenanceWindowExecutions",
           "ssm:GetAutomationExecution",
           "ssm:ListTagsForResource",
+          "ssm:GetCalendarState",
         ]
         Resource = "*"
       },

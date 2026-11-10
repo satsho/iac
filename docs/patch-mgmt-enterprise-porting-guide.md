@@ -65,33 +65,202 @@ RHEL/Windowsでフィルタキーが異なる点(RHEL: `SEVERITY`、Windows:
 | 深刻度の値 | `Critical`/`Important`/`Moderate`/`Low` | 同じ4値 |
 | 製品指定 | 不要 | `PRODUCT=WindowsServerXXXX`必須 |
 
-### 2.3 ゲートRunbook(`gated-patch-baseline.yaml`)
+### 2.3 ゲート(Gate)の仕組み
 
-`aws:executeScript`(Python/boto3)で以下2条件を判定するロジックは、
-EC2/オンプレを問わず同じAPI(`describe_maintenance_window_executions`、
-`describe_instance_patch_states_for_patch_group`)で動く。**そのまま移植可**。
+#### 目的
 
-1. 前段ウィンドウが直近N時間以内にSUCCESSで終わっている
-2. 前段パッチグループにFailed/PendingRebootが残っていない
+前段ステージ(test/stg)のパッチ適用が「本当に無事に終わっているか」を、
+次ステージ(stg/prod)のメンテナンスウィンドウが実行される直前に自動確認する。
+これにより、「前段が落ちているのに次ステージだけ先に進んでしまう」事故を防ぐ。
+承認(日数)が通っていても、ゲートで止まればそのステージのパッチ適用は
+**実行されない**(スキップ、エラーにはならずそのまま終了)。
 
-### 2.4 InstallNow(緊急・早く当てたい)
+#### いつ動くか
 
-`AddApprovedPatches`(個別承認リストへの追記、read-merge-write)、
-`InstanceId`(単体指定、`TargetTagValues`より優先)という設計、
-「承認する人と実行する人が同じなので`aws:approve`を挟まずIAM権限だけで
-制御する」という考え方もそのまま使える。**ただし社内のAssumeRoleチェーンに
-どう組み込むかは[3.2](#32-iamロール-assumeroleチェーンへの組み込み)で要検討**。
+メンテナンスウィンドウの`AUTOMATION`タイプのタスクとして、
+対象インスタンス**ごとに1回ずつ**、ウィンドウの実行開始時に起動される
+(Runbook名: `gated-patch-baseline.yaml`)。`RUN_COMMAND`タイプ
+(ゲート不要な最初のステージ)はこのRunbookを経由しない。
 
-実機で踏んだ落とし穴(`GetPatchBaselineForPatchGroup`はOS省略時WINDOWS扱い
-になる等)も同じAWS API仕様なので、EC2環境でも同様に発生しうる。
-`documents/install-now.yaml`はほぼそのままコピーして使える。
+#### 判定ロジック(2+1条件、すべて満たさないと先に進めない)
 
-### 2.5 RebootAndScan(手動再起動パターン)
+| # | 条件 | 確認に使うAPI | 満たさない場合 |
+|---|---|---|---|
+| 0 | (任意)指定した変更カレンダーが全てOPEN | `GetCalendarState` | 1つでもCLOSEDなら中止 |
+| 1 | 前段のメンテナンスウィンドウが、直近`GateMaxAgeHours`時間以内に`SUCCESS`で終わっている | `DescribeMaintenanceWindowExecutions` | 「直近◯時間以内に実行されていない」または「直近の実行が◯◯だった」で中止 |
+| 2 | 前段パッチグループの対象インスタンスに、適用失敗(`FailedCount`)・再起動待ち(`InstalledPendingRebootCount`)が残っていない | `DescribeInstancePatchStatesForPatchGroup` | 残っているインスタンスがあれば中止(手動再起動パターンの完了確認も兼ねる) |
 
-`AWS-RunShellScript`/`AWS-RunPowerShellScript`に「マーカーファイル+特定
-終了コード(RHEL: 194、Windows: 3010)」を返すスクリプトを渡し、SSM Agentに
-再起動→再実行させる仕組みはSSM Agent自体の機能なので、EC2でもオンプレでも
-同じ。**そのまま移植可**。
+条件1は**そのウィンドウ自身の実行履歴**を見る。前段を手動(`InstallNow`等)で
+修復しても、ウィンドウ自体が実行された記録がなければ条件1は満たせない
+(条件2のみ満たされる状態になる)。
+
+#### 処理フロー
+
+```
+メンテナンスウィンドウ(stg-weekly等)の実行開始
+  └─ 対象インスタンスごとに GatedPatchBaseline を起動
+        ├─ Step 1: CheckPreviousStage (aws:executeScript)
+        │     0. 変更カレンダーのチェック(任意)
+        │     1. 前段ウィンドウの直近実行がSUCCESSか
+        │     2. 前段パッチグループにFailed/PendingRebootが残っていないか
+        │     → どれか満たさなければ Exception を投げて Abort(以降のStepは実行されない)
+        ├─ Step 2: RunPatchBaseline (aws:runCommand)
+        │     AWS-RunPatchBaseline(Operation=Install)を対象インスタンスに実行
+        └─ (Automation自体の成功/失敗として記録される)
+```
+
+#### 主なパラメータ
+
+| パラメータ | 型 | 説明 |
+|---|---|---|
+| `InstanceId` | String | 対象インスタンスID(メンテナンスウィンドウから`{{RESOURCE_ID}}`が自動で渡る) |
+| `RebootOption` | String | `RebootIfNeeded`/`NoReboot` |
+| `GateWindowIds` | String(カンマ区切り) | 前段メンテナンスウィンドウのID。**空ならゲート条件1・2自体を確認しない**(testのようにゲート不要なステージでも、カレンダーチェックのためだけにこのRunbookを使うことができる) |
+| `GatePatchGroups` | String(カンマ区切り) | 前段パッチグループ名 |
+| `GateMaxAgeHours` | Integer | 条件1の有効期限(時間) |
+| `ChangeCalendarNames` | StringList | 条件0で確認する変更カレンダー名。空ならこの確認自体を行わない |
+
+#### 必要なIAM権限(Runbookの実行ロール)
+
+`ssm:DescribeMaintenanceWindowExecutions` /
+`ssm:DescribeInstancePatchStatesForPatchGroup` /
+`ssm:GetCalendarState` /
+`ssm:SendCommand`(`AWS-RunPatchBaseline`のみに限定)
+
+### 2.4 手動実行①: InstallNow(緊急・早く当てたい)
+
+#### 目的・ユースケース
+
+通常は「承認(日数)→ ゲート確認 → スケジュール(cron)」の3つが揃って
+初めてパッチが入るが、以下のような**例外的に急ぐケース**に対応する。
+
+- 既に承認条件を満たしているパッチを、次の定期ウィンドウを待たずに今すぐ入れたい
+- まだ承認条件(日数)を満たしていない緊急パッチ(ゼロデイ対応等)を、
+  承認待ちをスキップして今すぐ入れたい
+- 本適用の前に、カナリア的に1台だけ先に入れて様子を見たい
+
+ゲートとスケジュールは省略するが、**承認だけは省略できない**
+(ベースラインに無いパッチは絶対にインストールされないというPatch Manager
+自体の仕様のため)。承認する人と実行する人が同じという想定のもと、
+`aws:approve`のような人の承認クリックは挟まず、**実行できる(IAM権限を
+持っている)こと自体を唯一の制御**にしている。
+
+#### 処理フロー
+
+```
+Step 1: AddApprovedPatchesIfNeeded (aws:executeScript)
+  AddApprovedPatchesが空 → 何もせずスキップ(既に承認済みのものだけ入れる場合)
+  AddApprovedPatchesに指定あり →
+    1. GetPatchBaselineForPatchGroupでベースラインIDを取得
+       ★OperatingSystemは必ず明示する(省略するとWINDOWS扱いになり、
+         別オーナーのデフォルトベースラインにフォールバックする実機確認済みの不具合)
+    2. GetPatchBaselineで現在のApprovedPatchesを読み出す
+    3. 新規分を追記して UpdatePatchBaseline で書き戻す
+       (UpdatePatchBaselineのApprovedPatchesは全置き換えAPIのため、
+        読み出し→追記→書き戻しが必須。いきなり新規分だけ渡すと
+        既存の個別承認が全部消える)
+Step 2: RunPatchBaseline (aws:executeScript)
+  InstanceIdが指定されていればその1台だけ、無ければTargetTagValuesの
+  PatchGroup全体に AWS-RunPatchBaseline(Operation=Install)をSendCommand
+Step 3: WaitForPatchCommand ─ コマンド完了まで待つ
+Step 4: AssertPatchCommandSucceeded ─ Successであることを確認
+```
+
+#### 主なパラメータ
+
+| パラメータ | 型 | 説明 |
+|---|---|---|
+| `TargetTagValues` | String | 対象のPatchGroupタグ値(環境全体に適用)。`InstanceId`指定時は省略可 |
+| `InstanceId` | String | 対象を1台に絞りたい場合に指定。指定すると`TargetTagValues`より優先される |
+| `AddApprovedPatches` | StringList | 緊急で承認リストに追加したいアドバイザリID等。空なら追加なし |
+| `RebootOption` | String | `RebootIfNeeded`/`NoReboot` |
+| `MaxConcurrency`/`MaxErrors` | String | `TargetTagValues`指定時(複数台対象)の同時実行数・失敗許容数 |
+
+`AddApprovedPatches`と`InstanceId`を併用する場合、どのベースラインを
+更新するか特定するために`TargetTagValues`も併せて指定する必要がある
+(承認はインスタンス単位ではなくPatchGroup=ベースライン単位の概念のため)。
+
+#### 実行方法
+
+- コンソール: Systems Manager → 変更管理 → オートメーション → 対象Runbookを選択 →
+  「実行」。「シンプルな実行」で`InstanceId`に直接入力すれば1台に絞れる。
+  複数台へ同時実行数・失敗許容数を制御しながら流したい場合は「レート制御実行」を使う
+- CLI: `aws ssm start-automation-execution --document-name <name> --parameters '...'`
+
+#### 必要なIAM権限(Runbookの実行ロール)
+
+`ssm:GetPatchBaselineForPatchGroup` / `ssm:GetPatchBaseline` /
+`ssm:UpdatePatchBaseline` / `ssm:SendCommand`(`AWS-RunPatchBaseline`のみ) /
+`ssm:ListCommands` / `ssm:GetCommandInvocation`
+
+**この Runbook を誰が起動できるか(`ssm:StartAutomationExecution` +
+`iam:PassRole`)は、社内の職務分掌要件に合わせて別途絞り込むこと**
+(承認する人と実行する人が同じという前提が成立する人の範囲)。
+
+### 2.5 手動実行②: RebootAndScan(手動再起動パターン)
+
+#### 目的・ユースケース
+
+`RebootOption: NoReboot`でパッチを適用する環境(prod等、メンテナンス時間外の
+勝手な再起動を禁止したい環境)では、再起動が必要なパッチが入ると
+`InstalledPendingReboot`(再起動待ち)のまま残る。単にOS側で再起動しただけ
+では、**次のスキャンまでPatch Manager上は再起動待ちのまま**残り、次ステージの
+ゲート条件2(前段にPendingRebootが残っていないこと)も通らない。この
+Runbookは「再起動 → 再起動後にスキャンし直してコンプライアンスを更新」まで
+1回の実行でまとめて行う。
+
+#### 仕組み(終了コードによる間接トリガー)
+
+`AWS-RunShellScript`/`AWS-RunPowerShellScript`は「渡されたコマンドを
+そのまま実行するだけ」の汎用ドキュメントで、`AWS-RunPatchBaseline`の
+`RebootOption`のような「再起動が必要かどうかを判断する」機能を持たない。
+そのため、以下の**特定の終了コードを返すことでSSM Agent自身に再起動させる**
+という間接的な手段を使う。
+
+```
+1回目の実行: マーカーファイル確認 → 無い → 作成 → 特定の終了コードで終了
+  → SSM Agentがこの終了コードを検知 → OSを再起動
+  → 再起動完了後、SSM Agentが「手元に保持している同じスクリプト」を
+    (AWSに問い合わせ直すのではなく)もう一度実行する
+2回目の実行(再起動後、同じコマンドの継続): マーカーファイル確認 → ある
+  → 削除 → 通常の終了コード(0)で終了(ここで無限ループを防いでいる)
+```
+
+| | RHEL(`AWS-RunShellScript`) | Windows(`AWS-RunPowerShellScript`) |
+|---|---|---|
+| 継続トリガーの終了コード | `194` | `3010`(`ERROR_SUCCESS_REBOOT_REQUIRED`) |
+| マーカーファイル | `/var/tmp/patch-reboot.marker` | `$env:SystemRoot\Temp\patch-reboot.marker` |
+
+この挙動はSSM Agent自体の機能(AWS実装側)であり、EC2でもオンプレ
+(Hybrid Activation)でも同一。**そのまま移植可**。
+
+#### 処理フロー(Automation全体)
+
+```
+Step 1: Reboot (aws:runCommand → AWS-RunShellScript/AWS-RunPowerShellScript)
+  上記の終了コードトリックで、再起動を挟みつつ最終的にSuccessで終わるまで待つ
+Step 2: ScanAfterReboot (aws:runCommand → AWS-RunPatchBaseline, Operation=Scan)
+  再起動後の状態でスキャンし直し、コンプライアンスを更新する
+  (マーカーファイルのロジックとは無関係の、別のRun Command)
+```
+
+#### 主なパラメータ
+
+| パラメータ | 型 | 説明 |
+|---|---|---|
+| `InstanceId` | String | 再起動するインスタンスID |
+| `LogGroupName` | String | Run Commandの出力先ロググループ |
+
+#### 実行方法
+
+- 対象1台: `aws ssm start-automation-execution --document-name <name> --parameters 'InstanceId=...'`
+- 対象複数台(タグ指定、同時実行数・失敗許容数を制御): `--targets Key=tag:Env,Values=prod --target-parameter-name InstanceId --max-concurrency 1 --max-errors 0`
+
+#### 必要なIAM権限(Runbookの実行ロール)
+
+`ssm:SendCommand`(`AWS-RunShellScript`/`AWS-RunPowerShellScript`/
+`AWS-RunPatchBaseline`のみに限定) / `ssm:ListCommands` /
+`ssm:GetCommandInvocation`
 
 ### 2.6 通知・可視化のパターン
 

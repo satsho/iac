@@ -420,3 +420,106 @@ AssumeRoleする対象ではなく、AWSのSSMサービスが内部的に引き�
    スキャン・Install・ゲート・`InstallNow`・`RebootAndScan`を一通り検証
 7. 問題なければ対象を広げる。本番適用前に`docs/patch-mgmt-design.md`の
    社内版を作成し、運用チームへ引き継ぐ
+
+---
+
+## 7. 手動構築する場合のリソース作成チェックリスト(Terraformを使わない場合)
+
+Terraformを使わず、コンソール/CLIで直接作る場合の作成順(依存関係順)。
+括弧内は参照元リポジトリでの対応するTerraformリソース名/ファイル名。
+
+### 7.1 IAMロール
+
+- [ ] **Runbook/メンテナンスウィンドウの実行ロール**(`aws_iam_role.patch_automation`相当)
+  - 信頼ポリシー: `ssm.amazonaws.com`を信頼(人やEC2が直接AssumeRoleする対象ではない)
+  - 権限: 下記をインラインポリシーで付与
+    - `ssm:SendCommand`(リソースを`document/AWS-RunPatchBaseline`、
+      `document/AWS-RunShellScript`、`document/AWS-RunPowerShellScript`、
+      `managed-instance/*`に限定。他のドキュメントは実行させない)
+    - `ssm:ListCommands` / `ssm:GetCommandInvocation` / `ssm:CancelCommand`
+    - `ssm:DescribeInstanceInformation` / `ssm:DescribeInstancePatchStates` /
+      `ssm:DescribeInstancePatchStatesForPatchGroup` / `ssm:DescribeInstancePatches`
+    - `ssm:DescribeMaintenanceWindowExecutions`
+    - `ssm:GetAutomationExecution` / `ssm:ListTagsForResource`
+    - `ssm:GetCalendarState`(変更カレンダー連携を使う場合)
+    - `ssm:GetPatchBaseline` / `ssm:GetPatchBaselineForPatchGroup` /
+      `ssm:UpdatePatchBaseline`(`InstallNow`の個別承認追記用)
+    - `logs:CreateLogStream` / `logs:PutLogEvents`(Run Command出力・集計用ロググループへ)
+    - `cloudwatch:PutMetricData`(ダッシュボードの推移グラフ用メトリクスを出す場合)
+    - `iam:PassRole`(このロール自身を対象に、`iam:PassedToService=ssm.amazonaws.com`条件付き。
+      誰が実行できるかはこの権限を持つ側(強い権限ロール側)で制御する)
+  - 起動できるRunbookを7.5で作成したドキュメントARNに限定する
+    (`ssm:StartAutomationExecution`はこのロール自身には不要。呼び出す側
+    (人/CI/強い権限ロール)に付与し、`document/`と`automation-execution/*`
+    の両方のARNを許可すること)
+- [ ] **(ダッシュボード用の定期実行をEventBridge Schedulerで行う場合)Schedulerロール**
+  - 信頼ポリシー: `scheduler.amazonaws.com`
+  - 権限: 上記Runbookロールへの`iam:PassRole` + 該当Automationへの`ssm:StartAutomationExecution`
+- [ ] **(Inventory→Athena可視化を作る場合)Glueクローラ用ロール**
+  - 信頼ポリシー: `glue.amazonaws.com`
+  - 権限: `AWSGlueServiceRole`(AWS管理ポリシー)+ 対象S3バケットへの`s3:GetObject`/`s3:ListBucket`
+
+### 7.2 ロググループ・通知
+
+- [ ] CloudWatch Logsロググループ: Run Command出力用、コンプライアンス集計用、
+      イベント記録用(それぞれ保持期間を決めて作成)
+- [ ] SNSトピック(名前は`Automation-`で始める必要あり、`aws:approve`系の
+      承認通知を将来使う場合のAWS側制約。本構成では未使用でも慣習として踏襲可)
+      + メールサブスクリプション
+- [ ] EventBridgeルール(3種): メンテナンスウィンドウ実行結果・Automation実行結果・
+      パッチ非準拠化、それぞれのイベントパターンを設定しSNSトピックをターゲットに
+      (`input_transformer`相当の変換をコンソールの「ターゲットの入力」で設定)
+
+### 7.3 パッチベースライン
+
+- [ ] 環境(test/stg/prod)×OS(RHEL/Windows)ごとに作成
+  - 承認ルール: 分類・深刻度のフィルタ、`承認までの日数`または`承認対象の日付`
+  - 個別承認/拒否リスト: 初期値は空でよい(運用中に`InstallNow`相当の手動操作で追記していく)
+  - パッチグループへの登録: 対象インスタンスの`PatchGroup`タグ値と一致させる
+
+### 7.4 スキャン・Inventory収集(State Manager Association)
+
+- [ ] 日次スキャン: `AWS-RunPatchBaseline`(`Operation=Scan`)をPatchGroupタグ指定で
+      毎日実行するAssociationを作成(**1つのAssociationのタグ値は最大5個まで**という
+      AWS制限に注意。OS/環境が多ければAssociationを分割する)
+- [ ] (Inventory可視化を作る場合)`AWS-GatherSoftwareInventory`のAssociationを
+      全対象に対して作成 + Resource Data SyncでS3への自動エクスポートを設定
+
+### 7.5 Automation Runbook(SSMドキュメント)
+
+コンソールの「ドキュメント → 作成 → オートメーション」でYAMLを貼り付けて作成
+(Owner: Self)。内容は本ガイド[2.3〜2.5](#23-ゲートgateの仕組み)、実体は
+参照元リポジトリの`documents/*.yaml`。
+
+- [ ] ゲート付き適用(`gated-patch-baseline.yaml`相当)
+- [ ] InstallNow(`install-now.yaml`相当)
+- [ ] RebootAndScan(RHEL版・Windows版、`reboot-and-scan*.yaml`相当)
+- [ ] (ダッシュボードを作る場合)コンプライアンス集計(`collect-patch-compliance.yaml`相当)
+
+### 7.6 メンテナンスウィンドウ
+
+環境・曜日/月次サイクルごとに作成。
+
+- [ ] メンテナンスウィンドウ本体(スケジュール、実施時間、タイムゾーン)
+- [ ] ターゲット登録(タグ条件、`許可されていないターゲットでは実行しない`を有効化)
+- [ ] タスク登録
+  - ゲート不要なステージ: `RUN_COMMAND`で`AWS-RunPatchBaseline`を直接登録、
+    または7.5のゲート付きRunbookを「ゲート設定無し」で`AUTOMATION`登録
+    (変更カレンダー連携を使うなら後者が必須)
+  - ゲートが必要なステージ: `AUTOMATION`でゲート付きRunbookを登録、
+    パラメータに前段ウィンドウID・前段パッチグループ・有効期限時間・
+    (任意)変更カレンダー名を設定
+
+### 7.7 ダッシュボード・Inventory可視化(任意)
+
+- [ ] CloudWatchダッシュボードをJSON定義で作成(2枚: 今の状態/推移)
+- [ ] EventBridge Scheduler(または別のcron相当)でコンプライアンス集計Runbookを定期実行
+- [ ] S3バケット(Inventory用、Athenaクエリ結果用)
+- [ ] Glueデータベース・クローラ、Athenaワークグループ
+- [ ] (任意)可視化ツール(QuickSight/Grafana等)のデータソース設定
+
+### 7.8 変更カレンダー(任意)
+
+- [ ] Systems Manager → 変更カレンダー画面から直接作成(Terraform/API経由は
+      コンソールのGUIビルダーで編集できなくなるため非推奨)
+- [ ] 7.6のゲート付きRunbookの`ChangeCalendarNames`パラメータにカレンダー名を設定

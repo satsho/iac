@@ -130,7 +130,8 @@ variable "maintenance_windows" {
   default = {
     test-weekly = {
       description = "test: 毎週火曜 02:00。承認0日、自動再起動"
-      schedule    = "cron(0 2 ? * TUE *)"
+      # 検証用に一時的にat()へ変更(AUTOMATION化後の動作確認後、cron式に戻す)
+      schedule    = "at(2026-11-12T13:08:00)"
       target_tags = { Env = ["test"], RebootPolicy = ["auto"] }
       # ゲートは無いが、変更カレンダーのチェックのためAUTOMATION(GatedPatchBaseline、gate未設定)を使う
       task_type     = "AUTOMATION"

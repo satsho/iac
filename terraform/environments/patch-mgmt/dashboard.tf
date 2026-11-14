@@ -241,7 +241,7 @@ resource "aws_cloudwatch_dashboard" "history" {
             view    = "timeSeries"
             stat    = "Maximum"
             period  = 3600
-            metrics = [for env in local.dashboard_envs : [local.metric_namespace, metric, "Env", env]]
+            metrics = [for env in local.dashboard_envs : [local.metric_namespace, metric, "Environment", env]]
           }
         }
       ],

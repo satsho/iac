@@ -1,13 +1,13 @@
 locals {
   # パッチベースラインのキー(tst/stg/prd) => パッチグループ名。インスタンスのPatchGroupタグと一致させる
-  patch_groups = { for env in keys(var.patch_baselines) : env => "rhel10-${env}" }
+  patch_groups = { for env in keys(var.patch_baselines) : env => "rhel10-2-${env}" }
 }
 
 resource "aws_ssm_patch_baseline" "rhel" {
   for_each = var.patch_baselines
 
-  name             = "${local.name}-rhel10-${each.key}"
-  description      = "RHEL 10 ${each.key}: ${each.value.approve_until_date == null ? "approve after ${each.value.approve_after_days} day(s)" : "approve until ${each.value.approve_until_date}"}"
+  name             = "${local.name}-rhel10-2-${each.key}"
+  description      = "RHEL 10.2 ${each.key}: ${each.value.approve_until_date == null ? "approve after ${each.value.approve_after_days} day(s)" : "approve until ${each.value.approve_until_date}"}"
   operating_system = "REDHAT_ENTERPRISE_LINUX"
 
   # 承認ルールより優先される明示リスト。緊急パッチ(承認待ち日数を飛ばしたい)はapproved_patchesに、

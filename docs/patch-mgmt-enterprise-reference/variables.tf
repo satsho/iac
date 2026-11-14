@@ -22,8 +22,8 @@ variable "timezone" {
 
 variable "patch_baselines" {
   description = <<-EOT
-    環境ごとのRHEL用パッチベースライン。キーがパッチグループ名(rhel10-<キー>)になる。
-    対象インスタンスのPatchGroupタグをこの値に一致させること(例: PatchGroup=rhel10-stg)。
+    環境ごとのRHEL用パッチベースライン。キーがパッチグループ名(rhel10-2-<キー>)になる。
+    対象インスタンスのPatchGroupタグをこの値に一致させること(例: PatchGroup=rhel10-2-stg)。
     承認方式はどちらか一方を指定する:
       approve_after_days : アドバイザリの日付から N 日経ったパッチを自動承認(0〜360)
       approve_until_date : この日付(YYYY-MM-DD)以前のパッチだけを承認(「stgで検証した日付」まで、のように使う)
@@ -87,8 +87,13 @@ variable "maintenance_windows" {
   description = <<-EOT
     パッチ適用(Install)のメンテナンスウィンドウ。キーがウィンドウ名になる。
     schedule        : cron(分 時 日 月 曜日 年)。timezone変数のタイムゾーンで解釈される
-    target_tags     : タグキー => 値リスト。キー同士はAND、値リスト内はOR
-                      例: { Env = ["prd"], App = ["app-a", "app-b"] } → Env=prd かつ App が app-a か app-b
+    target_tags     : タグキー => 値リスト。キー同士はAND、値リスト内はOR。
+                      PatchGroupタグはOS+環境を一意に表す(rhel10-2-prd/win2025-prd等)ので、
+                      必ずいずれかのキーに含めること(RHEL/WindowsがEnvironmentタグの値を
+                      共有するため、PatchGroupが無いとRHEL用・Windows用のウィンドウが
+                      互いの対象も拾ってしまう)。
+                      例: { PatchGroup = ["rhel10-2-prd"], App = ["app-a", "app-b"] }
+                      → PatchGroup=rhel10-2-prd かつ App が app-a か app-b
     task_type       : RUN_COMMAND(AWS-RunPatchBaselineを直接実行) / AUTOMATION(ゲート付きRunbookを実行)
     reboot_option   : RebootIfNeeded(自動再起動) / NoReboot(再起動は手動)
     gate            : AUTOMATIONのみ。前段ステージのウィンドウが直近 max_age_hours 以内に成功しており、
@@ -119,31 +124,31 @@ variable "maintenance_windows" {
     tst-weekly = {
       description   = "tst: 毎週火曜 02:00。承認0日、自動再起動"
       schedule      = "cron(0 2 ? * TUE *)"
-      target_tags   = { Env = ["tst"], RebootPolicy = ["auto"] }
+      target_tags   = { PatchGroup = ["rhel10-2-tst"] }
       task_type     = "AUTOMATION" # ゲートは無いが、変更カレンダーチェックのためAUTOMATIONを使う
       reboot_option = "RebootIfNeeded"
     }
     stg-weekly = {
       description   = "stg: 毎週水曜 02:00(tstの1日後)。承認1日、tstの成功が前提、自動再起動"
       schedule      = "cron(0 2 ? * WED *)"
-      target_tags   = { Env = ["stg"], RebootPolicy = ["auto"] }
+      target_tags   = { PatchGroup = ["rhel10-2-stg"] }
       task_type     = "AUTOMATION"
       reboot_option = "RebootIfNeeded"
       gate = {
         windows       = ["tst-weekly"]
-        patch_groups  = ["rhel10-tst"]
+        patch_groups  = ["rhel10-2-tst"]
         max_age_hours = 48
       }
     }
     prd-weekly = {
       description   = "prd: 毎週金曜 02:00(stgの2日後)。承認2日、stgの成功が前提、再起動は手動"
       schedule      = "cron(0 2 ? * FRI *)"
-      target_tags   = { Env = ["prd"], RebootPolicy = ["manual"] }
+      target_tags   = { PatchGroup = ["rhel10-2-prd"] }
       task_type     = "AUTOMATION"
       reboot_option = "NoReboot"
       gate = {
         windows       = ["stg-weekly"]
-        patch_groups  = ["rhel10-stg"]
+        patch_groups  = ["rhel10-2-stg"]
         max_age_hours = 72
       }
       # 変更カレンダーで止めたい場合はコメントを外す(先にAWSコンソールで
@@ -155,14 +160,14 @@ variable "maintenance_windows" {
     tst-monthly-win = {
       description   = "Windows tst: 第3火曜 02:00(Patch Tuesday=第2火曜の1週間後)。承認0日、自動再起動"
       schedule      = "cron(0 2 ? * TUE#3 *)"
-      target_tags   = { Env = ["tst"], Os = ["Windows-2025"], RebootPolicy = ["auto"] }
+      target_tags   = { PatchGroup = ["win2025-tst"] }
       task_type     = "AUTOMATION"
       reboot_option = "RebootIfNeeded"
     }
     stg-monthly-win = {
       description   = "Windows stg: 第4火曜 02:00(tstの1週間後)。承認1日、tstの成功が前提、自動再起動"
       schedule      = "cron(0 2 ? * TUE#4 *)"
-      target_tags   = { Env = ["stg"], Os = ["Windows-2025"], RebootPolicy = ["auto"] }
+      target_tags   = { PatchGroup = ["win2025-stg"] }
       task_type     = "AUTOMATION"
       reboot_option = "RebootIfNeeded"
       gate = {
@@ -174,7 +179,7 @@ variable "maintenance_windows" {
     prd-monthly-win = {
       description   = "Windows prd: 翌月第1火曜 02:00。承認2日、stgの成功が前提、再起動は手動"
       schedule      = "cron(0 2 ? * TUE#1 *)"
-      target_tags   = { Env = ["prd"], Os = ["Windows-2025"], RebootPolicy = ["manual"] }
+      target_tags   = { PatchGroup = ["win2025-prd"] }
       task_type     = "AUTOMATION"
       reboot_option = "NoReboot"
       gate = {

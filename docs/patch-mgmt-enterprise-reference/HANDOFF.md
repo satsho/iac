@@ -71,10 +71,8 @@ README.md                              # 配置方法・事前準備・適用後
 
    | タグキー | 値の例 | 用途 |
    |---|---|---|
-   | `PatchGroup` | `rhel10-tst` / `rhel10-stg` / `rhel10-prd` / `win2025-tst` / `win2025-stg` / `win2025-prd` | どのパッチベースラインに属するか。**SSMの予約タグ名なので、このキー名は変更できない** |
-   | `Env` | `tst` / `stg` / `prd` | メンテナンスウィンドウのターゲット絞り込み用 |
-   | `RebootPolicy` | `auto` / `manual` | 自動再起動してよいか(`RebootIfNeeded` / `NoReboot`の切り分け) |
-   | `Os` | `Windows-2025` | Windows機にのみ付ける。RHEL機と`Env`/`RebootPolicy`が同じ値になるため、Windows用メンテナンスウィンドウの対象をRHEL機と区別するために必須 |
+   | `PatchGroup` | `rhel10-2-tst` / `rhel10-2-stg` / `rhel10-2-prd` / `win2025-tst` / `win2025-stg` / `win2025-prd` | どのパッチベースラインに属するか。**SSMの予約タグ名なので、このキー名は変更できない**。OS+環境を一意に表すので、メンテナンスウィンドウのターゲットには必ずこれを使う |
+   | `Environment` | `tst` / `stg` / `prd` | 社内の既存タグ命名規則に合わせた、環境を表す一般的なタグ。**メンテナンスウィンドウのターゲットには使わない**(RHEL/WindowsでEnvironmentの値が同じになるため、Environmentだけで絞り込むと互いの対象を拾ってしまう) |
 
    **要確認**: このタグ構成は検証環境で使ったものを前提に作られているが、実際の対象サーバに
    同じタグが付いているか(キー名・値の表記ゆれ含め)を実装前に必ず確認すること。異なる場合は
@@ -116,6 +114,15 @@ README.md                              # 配置方法・事前準備・適用後
 
 ## 7. 実装・運用上の既知の注意点(踏むと分かりにくい落とし穴)
 
+- **メンテナンスウィンドウの`target_tags`には必ず`PatchGroup`を含める**: AWSのメンテナンス
+  ウィンドウのターゲットタグ条件は「指定したタグキーだけをAND条件で見る」仕組みで、「このタグが
+  無いこと」を条件にする(除外する)ことはできない。もし`target_tags`を`Environment`だけ
+  (例: `{ Environment = ["prd"] }`)にすると、RHELとWindowsのprdサーバは両方`Environment=prd`
+  を持つため、RHEL用のつもりのウィンドウにWindows機も、Windows用のつもりのウィンドウにRHEL機も
+  一致してしまう。`PatchGroup`はOS+環境を一意に表す値(`rhel10-2-prd`/`win2025-prd`)なので、
+  これを`target_tags`に含めれば(他のタグを追加で組み合わせても)誤って混ざることがない。
+  このコードの`variables.tf`のデフォルト`maintenance_windows`は全て`PatchGroup`で
+  ターゲットしているので、**今後ウィンドウを追加・変更する場合も同じ原則を守ること**。
 - **`GetPatchBaselineForPatchGroup`のOS省略デフォルト問題**: `OperatingSystem`パラメータを
   省略すると`WINDOWS`扱いになる。RHELのパッチグループに対してこれをやると、該当パッチグループの
   登録が無いため、アカウント外(別アカウント所有)のWindowsデフォルトベースラインにフォールバック

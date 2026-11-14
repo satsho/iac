@@ -2,7 +2,7 @@ schemaVersion: '0.3'
 description: |-
   パッチの準拠状況と、未適用パッチのCVEを集めてダッシュボード用に書き出す(EventBridge Schedulerから1時間ごとに実行)。
     - CloudWatch Logs: ノードごとの状態(record=node)と、未適用・失敗・再起動待ちのパッチ(record=patch、CVE ID付き)
-    - CloudWatch メトリクス: 環境(Envタグ)ごとの不足・失敗・再起動待ちの件数(推移のグラフ用)
+    - CloudWatch メトリクス: 環境(Environmentタグ)ごとの不足・失敗・再起動待ちの件数(推移のグラフ用)
 assumeRole: '{{ AutomationAssumeRole }}'
 parameters:
   AutomationAssumeRole:
@@ -59,7 +59,7 @@ mainSteps:
                     nodes[node_id] = {
                         "name": tags.get("Name") or info.get("Name") or info.get("ComputerName") or node_id,
                         "ping": info.get("PingStatus"),
-                        "env": tags.get("Env", ""),
+                        "env": tags.get("Environment", ""),
                         "app": tags.get("App", ""),
                     }
             return nodes
@@ -139,7 +139,7 @@ mainSteps:
             # メトリクス(ダッシュボードの推移グラフ)
             metric_names = {"missing": "MissingPatches", "failed": "FailedPatches", "pending_reboot": "PendingRebootPatches"}
             metric_data = [
-                {"MetricName": metric_names[key], "Dimensions": [{"Name": "Env", "Value": env}], "Value": value, "Unit": "Count"}
+                {"MetricName": metric_names[key], "Dimensions": [{"Name": "Environment", "Value": env}], "Value": value, "Unit": "Count"}
                 for env, totals in env_totals.items()
                 for key, value in totals.items()
             ]

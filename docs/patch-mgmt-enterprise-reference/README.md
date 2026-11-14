@@ -56,10 +56,10 @@ prd/stg/tstの3環境に分かれているが、パッチ管理の仕組み自�
   | タグキー | 値の例 | 用途 |
   |---|---|---|
   | `PatchGroup` | `rhel10-2-tst` / `rhel10-2-stg` / `rhel10-2-prd` / `win2025-tst` / `win2025-stg` / `win2025-prd` | どのパッチベースラインに属するか(SSMの予約タグ名。これと同名のタグ付けが必須)。**OS+環境を一意に表すので、メンテナンスウィンドウのターゲットには必ずこれを使う** |
-  | `Environment` | `tst` / `stg` / `prd` | 社内の既存タグ命名規則に合わせた、環境を表す一般的なタグ。ダッシュボード等の集計には使えるが、**メンテナンスウィンドウのターゲットには使わない**(RHEL/WindowsでEnvironmentの値が同じになるため、Environmentだけで絞り込むと互いの対象を拾ってしまう。詳細は`variables.tf`の`maintenance_windows`コメント参照) |
+  | `Environment` | `TST` / `STG` / `PRD` | 社内の既存タグ命名規則に合わせた、環境を表す一般的なタグ。ダッシュボード等の集計には使えるが、**メンテナンスウィンドウのターゲットには使わない**(RHEL/WindowsでEnvironmentの値が同じになるため、Environmentだけで絞り込むと互いの対象を拾ってしまう。詳細は`variables.tf`の`maintenance_windows`コメント参照) |
 
-  例(RHELのprdサーバ): `PatchGroup=rhel10-2-prd, Environment=prd`
-  例(Windowsのstgサーバ): `PatchGroup=win2025-stg, Environment=stg`
+  例(RHELのprdサーバ): `PatchGroup=rhel10-2-prd, Environment=PRD`
+  例(Windowsのstgサーバ): `PatchGroup=win2025-stg, Environment=STG`
 
 - **対象サーバのSSM通信用IAMロール**: ネイティブEC2のインスタンスプロファイルロール、または
   Hybrid Activationで登録するロールのいずれも、既存のもの(`AmazonSSMManagedInstanceCore`相当の

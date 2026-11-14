@@ -1,0 +1,191 @@
+schemaVersion: '0.3'
+description: |-
+  次の定期メンテナンスウィンドウを待たず、今すぐInstallを実行する。対象はPatchGroup全体
+  (TargetTagValues)か、特定の1台(InstanceId)のどちらかを指定する(両方指定した場合はInstanceId
+  が優先される。InstanceIdだけ指定する場合、承認リストへの追記は行えない=TargetTagValuesで
+  どのベースラインか分からないため、AddApprovedPatchesと併用する場合はTargetTagValuesも指定する)。
+  承認・ゲート・スケジュールのうち、承認だけは省略できない(ベースラインに無いパッチは
+  絶対にインストールされない)ため、必要ならAddApprovedPatchesで個別承認リストに追記して
+  から実行する(update-patch-baselineのapproved-patchesは全置き換えのため、既存のリストを
+  読んでから追記して書き戻す)。ゲートチェックは行わない(人が直接判断して実行するため)。
+  RHEL/Windowsのどちらのパッチグループを指定したかは、TargetTagValuesの値から自動判定する。
+assumeRole: '{{ AutomationAssumeRole }}'
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: このRunbookが引き受けるIAMロールのARN
+    default: ${automation_role_arn}
+  TargetTagValues:
+    type: String
+    description: パッチを当てる対象(PatchGroupタグの値)。InstanceIdだけで1台に絞る場合は空欄でよい
+    default: ''
+    allowedValues: ${jsonencode(concat([""], patch_groups))}
+  InstanceId:
+    type: String
+    description: >-
+      (任意)特定の1台だけに当てたい場合のインスタンスID(i-xxxx)。
+      指定するとTargetTagValuesより優先され、その1台だけが対象になる
+    default: ''
+  AddApprovedPatches:
+    type: StringList
+    description: >-
+      (任意)緊急で承認リストに追加したいパッチID。RHELはRHSA-2026:1234のようなアドバイザリID、
+      WindowsはKB5099999のようなKB番号を指定する。複数ある場合はカンマ区切り。
+      通常は空欄のままでよい(すでに承認済みのパッチだけを今すぐ入れたい場合)
+    default: []
+    allowedPattern: '^(RHSA-\d{4}:\d+|KB\d{6,8})$'
+  RebootOption:
+    type: String
+    description: RebootIfNeeded(必要なら自動再起動、通常はこちら) / NoReboot(再起動は別途手動で行う)
+    default: RebootIfNeeded
+    allowedValues:
+      - RebootIfNeeded
+      - NoReboot
+  MaxConcurrency:
+    type: String
+    description: 同時に実行する台数(例 1, 10%)
+    default: '1'
+  MaxErrors:
+    type: String
+    description: この台数(割合)が失敗したら残りへの実行を止める
+    default: '0'
+  LogGroupName:
+    type: String
+    description: Run Commandの出力先ロググループ
+    default: ${log_group_name}
+mainSteps:
+  - name: AddApprovedPatchesIfNeeded
+    action: aws:executeScript
+    timeoutSeconds: 120
+    onFailure: Abort
+    inputs:
+      Runtime: python3.11
+      Handler: handler
+      InputPayload:
+        PatchGroup: '{{ TargetTagValues }}'
+        NewPatches: '{{ AddApprovedPatches }}'
+      Script: |-
+        import boto3
+
+        # PatchGroup名(TargetTagValues) => OperatingSystem。どちらのパッチベースラインを
+        # 更新すべきかは、PatchGroup名の接頭辞(rhel10-.../win2025-...)からここで判定する。
+        PATCH_GROUP_OS = ${jsonencode(patch_group_os)}
+
+
+        def handler(events, context):
+            new_patches = [p for p in events["NewPatches"] if p]
+            if not new_patches:
+                return {"summary": "追加なし、スキップ(既存の承認内容のまま実行)"}
+            if not events["PatchGroup"]:
+                raise Exception(
+                    "AddApprovedPatchesを指定する場合、どのベースラインを更新するか特定するため"
+                    "TargetTagValuesも指定してください(InstanceIdだけでは分かりません)"
+                )
+
+            operating_system = PATCH_GROUP_OS.get(events["PatchGroup"])
+            if operating_system is None:
+                raise Exception(f"未知のPatchGroupです: {events['PatchGroup']!r}")
+
+            ssm = boto3.client("ssm")
+            # OperatingSystemを省略するとWINDOWS扱いになり、RHELのパッチグループは
+            # 登録が無いためアカウントのWindowsデフォルトベースライン(別アカウント所有)に
+            # フォールバックしてしまう(UpdatePatchBaselineで"must name the calling account"
+            # エラーになって発覚した)。必ず明示する。
+            baseline_id = ssm.get_patch_baseline_for_patch_group(
+                PatchGroup=events["PatchGroup"],
+                OperatingSystem=operating_system,
+            )["BaselineId"]
+
+            # update-patch-baselineのapproved-patchesは全置き換えのため、
+            # 必ず現在のリストを読んでから追記して書き戻す(既存の個別承認分を消さない)
+            current = ssm.get_patch_baseline(BaselineId=baseline_id).get("ApprovedPatches", [])
+            added = [p for p in new_patches if p not in current]
+
+            if not added:
+                return {"summary": f"{new_patches} は既に承認済み"}
+
+            ssm.update_patch_baseline(BaselineId=baseline_id, ApprovedPatches=current + added)
+            return {"summary": f"{added} を承認リストに追加(baseline={baseline_id})"}
+    outputs:
+      - Name: Summary
+        Selector: $.Payload.summary
+        Type: String
+  - name: RunPatchBaseline
+    action: aws:executeScript
+    timeoutSeconds: 7200
+    onFailure: Abort
+    inputs:
+      Runtime: python3.11
+      Handler: handler
+      InputPayload:
+        InstanceId: '{{ InstanceId }}'
+        TargetTagValues: '{{ TargetTagValues }}'
+        MaxConcurrency: '{{ MaxConcurrency }}'
+        MaxErrors: '{{ MaxErrors }}'
+        RebootOption: '{{ RebootOption }}'
+        LogGroupName: '{{ LogGroupName }}'
+        ExecutionId: '{{ automation:EXECUTION_ID }}'
+      Script: |-
+        import boto3
+
+
+        def handler(events, context):
+            ssm = boto3.client("ssm")
+            kwargs = {
+                "DocumentName": "AWS-RunPatchBaseline",
+                "MaxConcurrency": events["MaxConcurrency"],
+                "MaxErrors": events["MaxErrors"],
+                "TimeoutSeconds": 600,
+                "Comment": f"install-now {events['ExecutionId']}",
+                "Parameters": {
+                    "Operation": ["Install"],
+                    "RebootOption": [events["RebootOption"]],
+                },
+                "CloudWatchOutputConfig": {
+                    "CloudWatchOutputEnabled": True,
+                    "CloudWatchLogGroupName": events["LogGroupName"],
+                },
+            }
+
+            # InstanceIdが指定されていればその1台だけ、無ければTargetTagValuesの
+            # PatchGroup全体(従来通り)を対象にする
+            if events["InstanceId"]:
+                kwargs["InstanceIds"] = [events["InstanceId"]]
+            else:
+                if not events["TargetTagValues"]:
+                    raise Exception("InstanceIdかTargetTagValuesのどちらかを指定してください")
+                kwargs["Targets"] = [{"Key": "tag:PatchGroup", "Values": [events["TargetTagValues"]]}]
+
+            result = ssm.send_command(**kwargs)
+            return {"command_id": result["Command"]["CommandId"]}
+    outputs:
+      - Name: CommandId
+        Selector: $.Payload.command_id
+        Type: String
+  - name: WaitForPatchCommand
+    action: aws:waitForAwsResourceProperty
+    timeoutSeconds: 7200
+    onFailure: Abort
+    inputs:
+      Service: ssm
+      Api: ListCommands
+      CommandId: '{{ RunPatchBaseline.CommandId }}'
+      PropertySelector: $.Commands[0].Status
+      DesiredValues:
+        - Success
+        - Failed
+        - Cancelled
+        - TimedOut
+  - name: AssertPatchCommandSucceeded
+    action: aws:assertAwsResourceProperty
+    onFailure: Abort
+    inputs:
+      Service: ssm
+      Api: ListCommands
+      CommandId: '{{ RunPatchBaseline.CommandId }}'
+      PropertySelector: $.Commands[0].Status
+      DesiredValues:
+        - Success
+outputs:
+  - AddApprovedPatchesIfNeeded.Summary
+  - RunPatchBaseline.CommandId

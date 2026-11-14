@@ -187,20 +187,22 @@ aws ssm send-command --document-name AWS-RunShellScript \
 
 | タグ | 値の例 | 使い道 |
 |---|---|---|
-| `Env` | `test` / `stg` / `prod` / `mgmt` | メンテナンスウィンドウのターゲット |
+| `PatchGroup` | `rhel10-test` / `win2025-test` など | **パッチベースラインとの紐付け**(Patch Manager が見る)。OS+環境を一意に表すので、メンテナンスウィンドウのターゲットには必ずこれを含める |
+| `Environment` | `test` / `stg` / `prod` / `mgmt` | ダッシュボードの集計(環境別のグラフ)用。メンテナンスウィンドウのターゲットには使わない |
 | `App` | `sample-app` | アプリ単位のメンテナンスウィンドウ(本番想定) |
-| `RebootPolicy` | `auto` / `manual` | 自動再起動か手動再起動か |
-| `PatchGroup` | `rhel10-test` など | **パッチベースラインとの紐付け**(Patch Manager が見る) |
 | `Role` | `repository` / `infra` / `workload` | Run Command の対象指定など |
 
 タグは `ansible/patch-mgmt/vars.yml` の VM 定義に書き、アクティベーション経由でマネージドノードに付く。
 `PatchGroup` の値は、このディレクトリの `patch_baselines` のキー(`rhel10-<キー>`)と一致させる。
 
-メンテナンスウィンドウのターゲットは **タグを複数指定するとAND、1つのタグに値を複数書くとOR** になる:
+メンテナンスウィンドウのターゲットは **タグを複数指定するとAND、1つのタグに値を複数書くとOR** になる。
+`PatchGroup`はRHEL/Windowsで別の値になる(`rhel10-prod`/`win2025-prod`)ため、必ずこれを含めて対象を
+絞り込むこと(`Environment`だけで絞ると、RHEL/Windowsどちらも`Environment=prod`になるため、
+片方の環境だけに向けたつもりのウィンドウが、もう片方のOSのサーバも一緒に対象にしてしまう):
 
 ```hcl
-target_tags = { Env = ["prod"], App = ["app-a", "app-b"], RebootPolicy = ["auto"] }
-# → Env=prod かつ (App=app-a または App=app-b) かつ RebootPolicy=auto のサーバ
+target_tags = { PatchGroup = ["rhel10-prod"], App = ["app-a", "app-b"] }
+# → PatchGroup=rhel10-prod かつ (App=app-a または App=app-b) のサーバ
 ```
 
 ## パッチベースライン
@@ -241,9 +243,9 @@ AWS のドキュメントでは更新日(Updated Date)が基準と説明され�
 
 | ウィンドウ | 日時(JST) | ターゲット | タスク | 再起動 | ゲート |
 |---|---|---|---|---|---|
-| `test-weekly` | 毎週火 02:00 | Env=test かつ RebootPolicy=auto | RUN_COMMAND | 自動 | なし |
-| `stg-weekly` | 毎週水 02:00 | Env=stg かつ RebootPolicy=auto | AUTOMATION | 自動 | test-weekly が成功 |
-| `prod-weekly` | 毎週金 02:00 | Env=prod かつ RebootPolicy=manual | AUTOMATION | 手動 | stg-weekly が成功 |
+| `test-weekly` | 毎週火 02:00 | PatchGroup=rhel10-test | AUTOMATION | 自動 | なし |
+| `stg-weekly` | 毎週水 02:00 | PatchGroup=rhel10-stg | AUTOMATION | 自動 | test-weekly が成功 |
+| `prod-weekly` | 毎週金 02:00 | PatchGroup=rhel10-prod | AUTOMATION | 手動 | stg-weekly が成功 |
 
 1週間の流れの例(10/20 の週):
 
@@ -316,7 +318,7 @@ test を経由せずに入ってしまう。これを防ぐ方法は2つある�
 # prodを1台ずつ再起動する(タグで対象を選び、同時実行1台・1台でも失敗したら止める)
 aws ssm start-automation-execution \
   --document-name iac-poc-patch-RebootAndScanRhel \
-  --targets Key=tag:Env,Values=prod \
+  --targets Key=tag:PatchGroup,Values=rhel10-prod \
   --target-parameter-name InstanceId \
   --max-concurrency 1 --max-errors 0
 ```
@@ -330,7 +332,7 @@ Windows VMには `iac-poc-patch-RebootAndScanWindows` を使う(中身は同じ�
 ```bash
 aws ssm start-automation-execution \
   --document-name iac-poc-patch-RebootAndScanWindows \
-  --targets Key=tag:Os,Values=Windows-2025 \
+  --targets Key=tag:PatchGroup,Values=win2025-prod \
   --target-parameter-name InstanceId \
   --max-concurrency 1 --max-errors 0
 ```
@@ -422,7 +424,7 @@ EventBridge Scheduler(毎時10分)
   └ Runbook CollectPatchCompliance
       ├ Patch Manager の API でVMごとの件数と、未適用・失敗・再起動待ちのパッチ(CVE ID付き)を取得
       ├ CloudWatch Logs /iac-poc-patch/compliance に1行1レコードで書く → ダッシュボードの表
-      └ CloudWatch メトリクス(Env 別の件数)を書く                    → ダッシュボードのグラフ
+      └ CloudWatch メトリクス(Environment 別の件数)を書く             → ダッシュボードのグラフ
 EventBridge(ウィンドウ・Runbook・コンプライアンスのイベント)
   └ CloudWatch Logs /iac-poc-patch/events にそのまま書く              → 実行履歴の表
 ```

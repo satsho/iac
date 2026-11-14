@@ -129,7 +129,7 @@ vms:
     data_size_gb: 150
     nics:
       - { network: patch-mgmt, mac: "52:54:00:15:00:10", address: 192.168.150.10 }
-    tags: { Role: repository, Env: mgmt, App: repo-mirror, PatchGroup: rhel10-mgmt, RebootPolicy: manual }
+    tags: { Role: repository, Environment: mgmt, App: repo-mirror, PatchGroup: rhel10-mgmt }
 
   - name: patch-infra
     role: infra
@@ -139,7 +139,7 @@ vms:
     nics:
       - { network: patch-mgmt, mac: "52:54:00:15:00:11", address: 192.168.150.11 }
       - { network: patch-workload, mac: "52:54:00:15:01:11", address: 192.168.151.11 }
-    tags: { Role: infra, Env: mgmt, App: repo-mirror, PatchGroup: rhel10-mgmt, RebootPolicy: manual }
+    tags: { Role: infra, Environment: mgmt, App: repo-mirror, PatchGroup: rhel10-mgmt }
 
   - name: patch-test
     role: workload
@@ -147,7 +147,7 @@ vms:
     vcpus: 2
     nics:
       - { network: patch-workload, mac: "52:54:00:15:01:21", address: 192.168.151.21 }
-    tags: { Role: workload, Env: test, App: sample-app, PatchGroup: rhel10-test, RebootPolicy: auto }
+    tags: { Role: workload, Environment: test, App: sample-app, PatchGroup: rhel10-test }
 
   - name: patch-stg
     role: workload
@@ -155,7 +155,7 @@ vms:
     vcpus: 2
     nics:
       - { network: patch-workload, mac: "52:54:00:15:01:22", address: 192.168.151.22 }
-    tags: { Role: workload, Env: stg, App: sample-app, PatchGroup: rhel10-stg, RebootPolicy: auto }
+    tags: { Role: workload, Environment: stg, App: sample-app, PatchGroup: rhel10-stg }
 
   - name: patch-prod
     role: workload
@@ -163,4 +163,4 @@ vms:
     vcpus: 2
     nics:
       - { network: patch-workload, mac: "52:54:00:15:01:23", address: 192.168.151.23 }
-    tags: { Role: workload, Env: prod, App: sample-app, PatchGroup: rhel10-prod, RebootPolicy: manual }
+    tags: { Role: workload, Environment: prod, App: sample-app, PatchGroup: rhel10-prod }

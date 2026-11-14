@@ -100,8 +100,12 @@ variable "maintenance_windows" {
   description = <<-EOT
     パッチ適用(Install)のメンテナンスウィンドウ。キーがウィンドウ名になる。
     schedule        : cron(分 時 日 月 曜日 年)。timezone変数のタイムゾーンで解釈される
-    target_tags     : タグキー => 値リスト。キー同士はAND、値リスト内はOR
-                      例: { Env = ["prod"], App = ["app-a", "app-b"] } → Env=prod かつ App が app-a か app-b
+    target_tags     : タグキー => 値リスト。キー同士はAND、値リスト内はOR。
+                      PatchGroupタグはOS+環境を一意に表す(rhel10-prod/win2025-prod等)ので、
+                      必ずいずれかのキーに含めること(RHEL/Windowsが同じEnvironment値を持つため、
+                      PatchGroupが無いとRHEL用・Windows用のウィンドウが互いの対象も拾ってしまう)。
+                      例: { PatchGroup = ["rhel10-prod"], App = ["app-a", "app-b"] }
+                      → PatchGroup=rhel10-prod かつ App が app-a か app-b
     task_type       : RUN_COMMAND(AWS-RunPatchBaselineを直接実行) / AUTOMATION(ゲート付きRunbookを実行)
     reboot_option   : RebootIfNeeded(自動再起動) / NoReboot(再起動は手動)
     gate            : AUTOMATIONのみ。前段ステージのウィンドウが直近 max_age_hours 以内に成功しており、
@@ -131,7 +135,7 @@ variable "maintenance_windows" {
     test-weekly = {
       description = "test: 毎週火曜 02:00。承認0日、自動再起動"
       schedule    = "cron(0 2 ? * TUE *)"
-      target_tags = { Env = ["test"], RebootPolicy = ["auto"] }
+      target_tags = { PatchGroup = ["rhel10-test"] }
       # ゲートは無いが、変更カレンダーのチェックのためAUTOMATION(GatedPatchBaseline、gate未設定)を使う
       task_type     = "AUTOMATION"
       reboot_option = "RebootIfNeeded"
@@ -139,7 +143,7 @@ variable "maintenance_windows" {
     stg-weekly = {
       description   = "stg: 毎週水曜 02:00(testの1日後)。承認1日、testの成功が前提、自動再起動"
       schedule      = "cron(0 2 ? * WED *)"
-      target_tags   = { Env = ["stg"], RebootPolicy = ["auto"] }
+      target_tags   = { PatchGroup = ["rhel10-stg"] }
       task_type     = "AUTOMATION"
       reboot_option = "RebootIfNeeded"
       gate = {
@@ -151,7 +155,7 @@ variable "maintenance_windows" {
     prod-weekly = {
       description   = "prod: 毎週金曜 02:00(stgの2日後)。承認2日、stgの成功が前提、再起動は手動"
       schedule      = "cron(0 2 ? * FRI *)"
-      target_tags   = { Env = ["prod"], RebootPolicy = ["manual"] }
+      target_tags   = { PatchGroup = ["rhel10-prod"] }
       task_type     = "AUTOMATION"
       reboot_option = "NoReboot"
       gate = {
@@ -164,7 +168,7 @@ variable "maintenance_windows" {
     test-monthly-win = {
       description = "Windows test: 第3火曜 02:00(Patch Tuesday=第2火曜の1週間後)。承認0日、自動再起動"
       schedule    = "cron(0 2 ? * TUE#3 *)"
-      target_tags = { Env = ["test"], Os = ["Windows-2025"], RebootPolicy = ["auto"] }
+      target_tags = { PatchGroup = ["win2025-test"] }
       # ゲートは無いが、変更カレンダーのチェックのためAUTOMATION(GatedPatchBaseline、gate未設定)を使う
       task_type     = "AUTOMATION"
       reboot_option = "RebootIfNeeded"
@@ -172,7 +176,7 @@ variable "maintenance_windows" {
     stg-monthly-win = {
       description   = "Windows stg: 第4火曜 02:00(testの1週間後)。承認1日、testの成功が前提、自動再起動"
       schedule      = "cron(0 2 ? * TUE#4 *)"
-      target_tags   = { Env = ["stg"], Os = ["Windows-2025"], RebootPolicy = ["auto"] }
+      target_tags   = { PatchGroup = ["win2025-stg"] }
       task_type     = "AUTOMATION"
       reboot_option = "RebootIfNeeded"
       gate = {
@@ -184,7 +188,7 @@ variable "maintenance_windows" {
     prod-monthly-win = {
       description   = "Windows prod: 翌月第1火曜 02:00。承認2日、stgの成功が前提、再起動は手動"
       schedule      = "cron(0 2 ? * TUE#1 *)"
-      target_tags   = { Env = ["prod"], Os = ["Windows-2025"], RebootPolicy = ["manual"] }
+      target_tags   = { PatchGroup = ["win2025-prod"] }
       task_type     = "AUTOMATION"
       reboot_option = "NoReboot"
       gate = {

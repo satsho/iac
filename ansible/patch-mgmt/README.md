@@ -42,9 +42,9 @@ VM作成は2段階になっている。**フルのOSインストールはゴー�
    - SSM Agentのインストールと登録、タグの同期(仮想FWで許可したSSMの宛先に直接出る)
    - RHSMに登録する(ゴールデンイメージは未登録なので、activation keyがあれば登録、無ければ警告)
 
-例: `patch-test` の場合、`vars.yml` の `Env=test, PatchGroup=rhel10-test, RebootPolicy=auto` が
+例: `patch-test` の場合、`vars.yml` の `Environment=test, PatchGroup=rhel10-test` が
 マネージドノード(`mi-0abc...`)のタグになり、Terraform 側のメンテナンスウィンドウ
-(`Env=test かつ RebootPolicy=auto`)とパッチグループ(`rhel10-test`)の対象になる。
+(`PatchGroup=rhel10-test`)とパッチグループ(`rhel10-test`)の対象になる。
 タグは `vars.yml` を直して `site.yml` を流し直せば、マネージドノード側も書き換わる。
 
 ## 前提

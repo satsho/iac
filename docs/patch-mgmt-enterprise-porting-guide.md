@@ -274,7 +274,7 @@ Step 2: ScanAfterReboot (aws:runCommand → AWS-RunPatchBaseline, Operation=Scan
 #### 実行方法
 
 - 対象1台: `aws ssm start-automation-execution --document-name <name> --parameters 'InstanceId=...'`
-- 対象複数台(タグ指定、同時実行数・失敗許容数を制御): `--targets Key=tag:Env,Values=prod --target-parameter-name InstanceId --max-concurrency 1 --max-errors 0`
+- 対象複数台(タグ指定、同時実行数・失敗許容数を制御): `--targets Key=tag:PatchGroup,Values=rhel10-2-prd --target-parameter-name InstanceId --max-concurrency 1 --max-errors 0`
 
 #### 必要なIAM権限(Runbookの実行ロール)
 

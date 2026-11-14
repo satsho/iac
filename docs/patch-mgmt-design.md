@@ -125,11 +125,9 @@ RHELと同じクローン方式に切り替える想定。
 
 | タグ | 値の例 | 用途 |
 |---|---|---|
-| `Env` | `test`/`stg`/`prod`/`mgmt` | メンテナンスウィンドウのターゲット |
+| `PatchGroup` | `rhel10-test`/`win2025-test`等 | **パッチベースラインとの紐付け**(Patch Managerが見る)。OS+環境を一意に表すので、メンテナンスウィンドウのターゲットには必ずこれを含める(詳細は8節) |
+| `Environment` | `test`/`stg`/`prod`/`mgmt` | ダッシュボードの集計(環境別のグラフ)用。メンテナンスウィンドウのターゲットには使わない |
 | `App` | `sample-app` | アプリ単位のメンテナンスウィンドウ(将来の拡張余地) |
-| `Os` | `Windows-2025` | RHEL/Windowsの切り分け(RHELは付与なし) |
-| `RebootPolicy` | `auto`/`manual` | 自動再起動か手動再起動か |
-| `PatchGroup` | `rhel10-test`/`win2025-test`等 | **パッチベースラインとの紐付け**(Patch Managerが見る) |
 | `Role` | `repository`/`infra`/`workload` | Run Commandの対象指定など |
 
 ## 5. パッチ承認の考え方(3軸モデル)
@@ -259,7 +257,7 @@ Step 4: AssertPatchCommandSucceeded
 
 ## 9. 手動再起動パターン(RebootAndScan)
 
-prod(`RebootPolicy: manual`)は`RebootOption: NoReboot`でパッチを適用する
+prodはメンテナンスウィンドウの設定により`RebootOption: NoReboot`でパッチを適用する
 ため、再起動が必要なパッチが入ると`InstalledPendingReboot`のまま残る。
 `virsh reboot`やVM内から直接再起動しただけでは、次のスキャンまでPatch
 Manager上は再起動待ちのまま残り、次ステージのゲートも通らない。

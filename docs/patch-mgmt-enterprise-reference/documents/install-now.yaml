@@ -68,7 +68,7 @@ mainSteps:
         import boto3
 
         # PatchGroup名(TargetTagValues) => OperatingSystem。どちらのパッチベースラインを
-        # 更新すべきかは、PatchGroup名の接頭辞(rhel10-.../win2025-...)からここで判定する。
+        # 更新すべきかは、PatchGroup名の接頭辞(rhel10-2-.../win2025-...)からここで判定する。
         PATCH_GROUP_OS = ${jsonencode(patch_group_os)}
 
 

@@ -9,7 +9,7 @@ notification_email = "you@example.com"
 #   prod-app-b-sunday = {
 #     description   = "prod app-b: 毎週日曜 03:00。app-bはアプリ側の都合で日曜に自動再起動"
 #     schedule      = "cron(0 3 ? * SUN *)"
-#     target_tags   = { Env = ["prod"], App = ["app-b"], RebootPolicy = ["auto"] }
+#     target_tags   = { PatchGroup = ["rhel10-prod"], App = ["app-b"] }
 #     task_type     = "AUTOMATION"
 #     reboot_option = "RebootIfNeeded"
 #     gate          = { windows = ["stg-weekly"], patch_groups = ["rhel10-stg"], max_age_hours = 120 }

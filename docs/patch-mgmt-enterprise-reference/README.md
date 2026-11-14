@@ -18,8 +18,9 @@
   通信できて`PatchGroup`等のタグが付いていれば、このTerraformの他の部分(ベースライン・
   メンテナンスウィンドウ・ゲート等)はネイティブEC2かHAかを区別しない。
 - **タグベースのみ**。個別VMをTerraformで列挙する構成要素は無い(自宅ラボにあったVM構築用の
-  Terraform/Ansibleはそもそも対象外)。全てのメンテナンスウィンドウ・スキャンは`PatchGroup`/`Env`
-  タグで対象を絞り込む。
+  Terraform/Ansibleはそもそも対象外)。メンテナンスウィンドウ・スキャンは`PatchGroup`タグで
+  対象を絞り込む(`Environment`タグは今回のコードではターゲット指定に使っていない。詳細は
+  下記「タグ付け」参照)。
 - **Inventory/Athena/Grafanaダッシュボードは今回は含めていない。** まずコア機能(ベースライン・
   スキャン・メンテナンスウィンドウ・ゲート・InstallNow・RebootAndScan・通知)を動かしてから、
   必要になった時点で追加する想定。
@@ -54,13 +55,11 @@ prd/stg/tstの3環境に分かれているが、パッチ管理の仕組み自�
 
   | タグキー | 値の例 | 用途 |
   |---|---|---|
-  | `PatchGroup` | `rhel10-tst` / `rhel10-stg` / `rhel10-prd` / `win2025-tst` / `win2025-stg` / `win2025-prd` | どのパッチベースラインに属するか(SSMの予約タグ名。これと同名のタグ付けが必須) |
-  | `Env` | `tst` / `stg` / `prd` | メンテナンスウィンドウのターゲット絞り込み用。`PatchGroup`と情報は重複するが、環境単位の判定をしたい場面(ゲートの前段確認等)のために分けている |
-  | `RebootPolicy` | `auto` / `manual` | そのサーバを自動再起動してよいか(`RebootIfNeeded` / `NoReboot`の切り分け) |
-  | `Os` | `Windows-2025` | Windows機にのみ付ける。RHEL機と`Env`/`RebootPolicy`が同じ値になるため、Windows用メンテナンスウィンドウのターゲットをRHEL機と区別するために必要 |
+  | `PatchGroup` | `rhel10-2-tst` / `rhel10-2-stg` / `rhel10-2-prd` / `win2025-tst` / `win2025-stg` / `win2025-prd` | どのパッチベースラインに属するか(SSMの予約タグ名。これと同名のタグ付けが必須)。**OS+環境を一意に表すので、メンテナンスウィンドウのターゲットには必ずこれを使う** |
+  | `Environment` | `tst` / `stg` / `prd` | 社内の既存タグ命名規則に合わせた、環境を表す一般的なタグ。ダッシュボード等の集計には使えるが、**メンテナンスウィンドウのターゲットには使わない**(RHEL/WindowsでEnvironmentの値が同じになるため、Environmentだけで絞り込むと互いの対象を拾ってしまう。詳細は`variables.tf`の`maintenance_windows`コメント参照) |
 
-  例(RHELのprdサーバ): `PatchGroup=rhel10-prd, Env=prd, RebootPolicy=manual`
-  例(Windowsのstgサーバ): `PatchGroup=win2025-stg, Env=stg, RebootPolicy=auto, Os=Windows-2025`
+  例(RHELのprdサーバ): `PatchGroup=rhel10-2-prd, Environment=prd`
+  例(Windowsのstgサーバ): `PatchGroup=win2025-stg, Environment=stg`
 
 - **対象サーバのSSM通信用IAMロール**: ネイティブEC2のインスタンスプロファイルロール、または
   Hybrid Activationで登録するロールのいずれも、既存のもの(`AmazonSSMManagedInstanceCore`相当の

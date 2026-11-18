@@ -26,3 +26,10 @@ kubectl apply -f localargo/root-app.yaml
 3. mainにマージする
 
 `root-app.yaml`が`apps/`を自動同期しているため、マージ後は手動操作不要でArgoCDが新しいApplicationを検知し、対象アプリをデプロイする。
+
+## 例外: Helmチャートを直接ソースにするアプリ
+
+Istio関連(`istio-base`/`istio-istiod`/`kiali`)は、CRD一式を手書きマニフェストとして
+維持するのが現実的でないため、`manifests/`配下を経由せず`source.repoURL`に
+Helmチャートのリポジトリ(例: `https://istio-release.storage.googleapis.com/charts`)を
+直接指定している。上記の手順2はそのまま、手順1(`manifests/<app名>/`の追加)だけ省略する形。

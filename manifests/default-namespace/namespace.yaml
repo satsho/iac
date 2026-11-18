@@ -1,0 +1,10 @@
+# defaultネームスペースはこれまでこのリポジトリのGitOps管理外だった(demo-nginx/oauth2-proxy
+# は手動でkubectl applyされたもの)。istio-injectionラベルだけをGitOpsで管理するために
+# このNamespaceオブジェクトを追加する。既存のdefaultネームスペース自体は壊さず、
+# ラベルのマージだけが行われる。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: default
+  labels:
+    istio-injection: enabled

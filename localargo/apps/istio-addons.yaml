@@ -1,0 +1,21 @@
+# Istio関連のアドオン(現状はPrometheusのみ)。manifests/istio-addons配下を素のまま適用する。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: istio-addons
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/satsho/iac.git
+    targetRevision: main
+    path: manifests/istio-addons
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: istio-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

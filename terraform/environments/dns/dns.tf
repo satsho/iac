@@ -42,3 +42,12 @@ resource "aws_route53_record" "grafana_tailscale" {
   ttl     = 300
   records = [var.tailscale_home_ip]
 }
+
+# Kiali(Istioメッシュ可視化)も同じホスト上のGatewayで受ける。
+resource "aws_route53_record" "kiali_tailscale" {
+  zone_id = aws_route53_zone.main.zone_id
+  name    = "kiali.${var.domain_name}"
+  type    = "A"
+  ttl     = 300
+  records = [var.tailscale_home_ip]
+}

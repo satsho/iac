@@ -8,6 +8,7 @@ description: |-
   絶対にインストールされない)ため、必要ならAddApprovedPatchesで個別承認リストに追記して
   から実行する(update-patch-baselineのapproved-patchesは全置き換えのため、既存のリストを
   読んでから追記して書き戻す)。ゲートチェックは行わない(人が直接判断して実行するため)。
+  RHEL/Windowsのどちらのパッチグループを指定したかは、TargetTagValuesの値から自動判定する。
 assumeRole: '{{ AutomationAssumeRole }}'
 parameters:
   AutomationAssumeRole:
@@ -28,10 +29,11 @@ parameters:
   AddApprovedPatches:
     type: StringList
     description: >-
-      (任意)緊急で承認リストに追加したいRHSA ID。複数ある場合はカンマ区切りで指定する。
+      (任意)緊急で承認リストに追加したいパッチID。RHELはRHSA-2026:1234のようなアドバイザリID、
+      WindowsはKB5099999のようなKB番号を指定する。複数ある場合はカンマ区切り。
       通常は空欄のままでよい(すでに承認済みのパッチだけを今すぐ入れたい場合)
     default: []
-    allowedPattern: '^RHSA-\d{4}:\d+$'
+    allowedPattern: '^(RHSA-\d{4}:\d+|KB\d{6,8})$'
   RebootOption:
     type: String
     description: RebootIfNeeded(必要なら自動再起動、通常はこちら) / NoReboot(再起動は別途手動で行う)
@@ -65,6 +67,10 @@ mainSteps:
       Script: |-
         import boto3
 
+        # PatchGroup名(TargetTagValues) => OperatingSystem。どちらのパッチベースラインを
+        # 更新すべきかは、PatchGroup名の接頭辞(rhel10-.../win2025-...)からここで判定する。
+        PATCH_GROUP_OS = ${jsonencode(patch_group_os)}
+
 
         def handler(events, context):
             new_patches = [p for p in events["NewPatches"] if p]
@@ -76,6 +82,10 @@ mainSteps:
                     "TargetTagValuesも指定してください(InstanceIdだけでは分かりません)"
                 )
 
+            operating_system = PATCH_GROUP_OS.get(events["PatchGroup"])
+            if operating_system is None:
+                raise Exception(f"未知のPatchGroupです: {events['PatchGroup']!r}")
+
             ssm = boto3.client("ssm")
             # OperatingSystemを省略するとWINDOWS扱いになり、RHELのパッチグループは
             # 登録が無いためアカウントのWindowsデフォルトベースライン(別アカウント所有)に
@@ -83,7 +93,7 @@ mainSteps:
             # エラーになって発覚した)。必ず明示する。
             baseline_id = ssm.get_patch_baseline_for_patch_group(
                 PatchGroup=events["PatchGroup"],
-                OperatingSystem="REDHAT_ENTERPRISE_LINUX",
+                OperatingSystem=operating_system,
             )["BaselineId"]
 
             # update-patch-baselineのapproved-patchesは全置き換えのため、

@@ -1,0 +1,29 @@
+# Istioのインストール手順(base → istiod → アドオン)の最初の1つ。CRDとクラスタ共通の
+# リソース(ClusterRole等)だけを入れる。公式Helmリポジトリから直接取得する(このリポジトリの
+# 他アプリと違い、手書きマニフェストではなくHelmチャートをそのまま使う。CRD一式を手で
+# 維持するのは現実的でないため)。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: istio-base
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  project: default
+  source:
+    repoURL: https://istio-release.storage.googleapis.com/charts
+    chart: base
+    targetRevision: 1.30.8
+    helm:
+      releaseName: istio-base
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: istio-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

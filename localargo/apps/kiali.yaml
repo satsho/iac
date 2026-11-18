@@ -1,0 +1,38 @@
+# Istioのメッシュ可視化UI。Prometheus(istio-addons)をデータソースに使う。
+# 認証はanonymous(自宅LAN内のみを想定)。外部公開はmanifests/gateway/httproute-kiali.yamlで
+# 既存のGateway API(Traefik)経由にする(Kiali自身のIngressは無効化)。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kiali
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://kiali.org/helm-charts
+    chart: kiali-server
+    targetRevision: 2.35.0
+    helm:
+      releaseName: kiali
+      valuesObject:
+        auth:
+          strategy: anonymous
+        deployment:
+          ingress:
+            enabled: false
+        external_services:
+          prometheus:
+            url: http://prometheus.istio-system:9090
+          grafana:
+            enabled: true
+            in_cluster_url: http://grafana.grafana:3000
+            external_url: https://grafana.focus4.net
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: istio-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

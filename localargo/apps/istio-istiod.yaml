@@ -1,0 +1,33 @@
+# Istioのコントロールプレーン本体(istiod)。istio-base(CRD)の後に入れる
+# (sync-waveで順序を保証)。Ingress Gatewayは入れない — 外部公開は既存の
+# Traefik(Gateway API)をそのまま使い、Istioはサイドカー注入によるメッシュ内の
+# 可視化・制御だけに使う。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: istio-istiod
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  project: default
+  source:
+    repoURL: https://istio-release.storage.googleapis.com/charts
+    chart: istiod
+    targetRevision: 1.30.8
+    helm:
+      releaseName: istiod
+      valuesObject:
+        meshConfig:
+          # Pod単位ではなくnamespace単位でサイドカー注入を制御する
+          # (default/grafana/keycloak namespaceのistio-injection=enabledラベルで指定)
+          accessLogFile: /dev/stdout
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: istio-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

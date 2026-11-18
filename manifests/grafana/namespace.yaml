@@ -1,0 +1,8 @@
+# Istioのサイドカー自動注入を有効化する。namespace自体はApplicationのCreateNamespace=true
+# で既に存在しているはずだが、ラベルを明示的にGitOps管理するためここで定義する。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: grafana
+  labels:
+    istio-injection: enabled

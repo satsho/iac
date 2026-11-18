@@ -1,0 +1,23 @@
+# defaultネームスペースへのistio-injectionラベル付与だけを目的としたApplication。
+# default自体はこれまでGitOps管理外だったため、他のアプリ(grafana/keycloakは各自の
+# manifests配下でNamespaceを管理する)とは別に単独で用意する。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: default-namespace
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/satsho/iac.git
+    targetRevision: main
+    path: manifests/default-namespace
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true

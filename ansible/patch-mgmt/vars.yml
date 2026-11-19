@@ -21,6 +21,13 @@ golden_image_path: "{{ libvirt_image_dir }}/rhel10-golden.qcow2"
 # virt-install --os-variant に渡す値(osinfo-query os | grep rhel10 で確認)
 os_variant: rhel10.0
 
+# packer/windows2025-golden.pkr.hcl で1回だけビルドするWindows側のゴールデンイメージ。
+golden_image_path_windows: "{{ libvirt_image_dir }}/windows2025-golden.qcow2"
+# virt-install --os-variant に渡す値。`osinfo-query os | grep -i "server 2025"`で確認し、
+# 見つからない場合(osinfo-dbがまだWindows Server 2025に対応していない場合)は
+# win2k22で代用する(ゲストOSの最適化ヒントが多少ずれるだけで、動作自体には影響しない)。
+os_variant_windows: win2k25
+
 # ---------------------------------------------------------------------------
 # VMへのSSH
 # ---------------------------------------------------------------------------
@@ -33,6 +40,8 @@ ssh_public_key_file: "~/.ssh/id_ed25519.pub"
 ssh_password_authentication: false
 # VMは作り直すとホスト鍵が変わるので、普段のknown_hostsとは分けておく(destroy.ymlで消す)
 ssh_known_hosts_file: "~/.ssh/known_hosts_patch_mgmt"
+# WindowsVMのSSH接続ユーザー(OpenSSH Server + Administratorsグループ前提、common-windows.yml参照)
+vm_user_windows: Administrator
 
 # ---------------------------------------------------------------------------
 # ネットワーク
@@ -72,6 +81,9 @@ libvirt_networks:
 repository_ip: 192.168.150.10
 infra_mgmt_ip: 192.168.150.11
 infra_workload_ip: 192.168.151.11
+# WSUS(patch-wsus)のpatch-workload側アドレス。test-win/stg-win/prod-winが
+# Windows Updateの取得元として参照する(workload-windows.yml参照)。
+wsus_workload_ip: 192.168.151.27
 
 # ---------------------------------------------------------------------------
 # 業務VMの仮想FW(KVMホストのnftables)
@@ -117,9 +129,13 @@ trivy_scan_schedule: "*-*-* 02:30:00"
 # VM
 # ---------------------------------------------------------------------------
 # tags は SSM のマネージドノードに付くタグ(Name はVM名が自動で付く)。playbookを流すたびに同期する。
-# PatchGroup は Terraform の patch_baselines のキー(rhel10-<キー>)と一致させること。
-# data_size_gb があるVMには、VMを作り直しても消えないミラー用データディスクを付ける。
-# nics の1つ目のアドレスに、KVMホストからSSHする。
+# PatchGroup は Terraform の patch_baselines/windows_patch_baselines のキー
+# (rhel10-<キー> / win2025-<キー>)と一致させること。
+# data_size_gb があるVMには、VMを作り直しても消えないミラー用/コンテンツ用データディスクを付ける。
+# nics の1つ目のアドレスに、KVMホストからSSHする(複数NIC持つVMは、patch-mgmt側を1つ目にする
+# =デフォルトルートをpatch-mgmt経由にする。patch-infra/patch-wsusを参照)。
+# os: windows が無いVMは全てRHEL扱い(site.yml参照)。roleはworkload-windows(Windows業務VM)/
+# wsus(WSUSサーバ)を追加で使う。
 
 vms:
   - name: patch-repository
@@ -164,3 +180,46 @@ vms:
     nics:
       - { network: patch-workload, mac: "52:54:00:15:01:23", address: 192.168.151.23 }
     tags: { Role: workload, Environment: prod, App: sample-app, PatchGroup: rhel10-prod }
+
+  # --- Windows ---
+  # osキー(windows)が無いVMは全てRHEL扱い(site.yml参照)。
+  # WindowsはPackerのゴールデンイメージ+virt-customizeのfirstbootスクリプトで
+  # クローンする(packer/windows2025-golden.pkr.hcl、kvm-install-windows.yml)。
+
+  - name: patch-wsus
+    role: wsus
+    os: windows
+    memory_mb: 4096
+    vcpus: 2
+    data_size_gb: 100
+    nics:
+      - { network: patch-mgmt, mac: "52:54:00:15:00:12", address: 192.168.150.12 }
+      - { network: patch-workload, mac: "52:54:00:15:01:27", address: 192.168.151.27 }
+    tags: { Role: wsus, Environment: mgmt, App: wsus, PatchGroup: win2025-mgmt }
+
+  - name: patch-test-win
+    role: workload-windows
+    os: windows
+    memory_mb: 4096
+    vcpus: 2
+    nics:
+      - { network: patch-workload, mac: "52:54:00:15:01:24", address: 192.168.151.24 }
+    tags: { Role: workload, Environment: test, App: sample-app, PatchGroup: win2025-test }
+
+  - name: patch-stg-win
+    role: workload-windows
+    os: windows
+    memory_mb: 4096
+    vcpus: 2
+    nics:
+      - { network: patch-workload, mac: "52:54:00:15:01:25", address: 192.168.151.25 }
+    tags: { Role: workload, Environment: stg, App: sample-app, PatchGroup: win2025-stg }
+
+  - name: patch-prod-win
+    role: workload-windows
+    os: windows
+    memory_mb: 4096
+    vcpus: 2
+    nics:
+      - { network: patch-workload, mac: "52:54:00:15:01:26", address: 192.168.151.26 }
+    tags: { Role: workload, Environment: prod, App: sample-app, PatchGroup: win2025-prod }

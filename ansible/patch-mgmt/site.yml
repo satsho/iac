@@ -48,6 +48,27 @@
           {{ golden_image_path }} が無いので、先に packer/ でゴールデンイメージを
           作ってください(ansible/patch-mgmt/packer/README.md参照)。
 
+    - name: Check whether any Windows VM is defined
+      ansible.builtin.set_fact:
+        has_windows_vms: "{{ vms | selectattr('os', 'defined') | selectattr('os', 'equalto', 'windows') | list | length > 0 }}"
+
+    - name: Check that the Windows golden image exists
+      ansible.builtin.stat:
+        path: "{{ golden_image_path_windows }}"
+      register: golden_image_windows
+      become: true
+      when: has_windows_vms
+
+    - name: Fail when the Windows golden image is missing
+      ansible.builtin.assert:
+        that:
+          - golden_image_windows.stat.exists
+        fail_msg: >-
+          {{ golden_image_path_windows }} が無いので、先に packer/ で
+          `packer build windows2025-golden.pkr.hcl` を実行してゴールデンイメージを
+          作ってください(ansible/patch-mgmt/packer/README.md参照)。
+      when: has_windows_vms
+
     - name: Check that the SSH public key exists
       ansible.builtin.stat:
         path: "{{ ssh_public_key_file | expanduser }}"
@@ -109,10 +130,13 @@
       ansible.builtin.set_fact:
         new_vms: "{{ existing_vms.results | selectattr('rc', 'ne', 0) | map(attribute='item') | list }}"
 
-    # インストールは全台同時に始め(virt-installはすぐ戻る)、終わったものから順に起動する
-    - name: Start the installations from the ISO
+    # インストールは全台同時に始め(virt-installはすぐ戻る)、終わったものから順に起動する。
+    # OSごとにクローン方式が違う(RHEL: virt-customizeでnmconnectionを直接書き込み /
+    # Windows: virt-customizeのfirstbootスクリプトでIP設定・リネームを初回起動時に実行)ので、
+    # vm.osに応じてincludeするタスクファイルを切り替える。
+    - name: Start the installations from the golden images
       ansible.builtin.include_tasks:
-        file: tasks/kvm-install.yml
+        file: "tasks/kvm-install{{ '-windows' if (vm.os | default('rhel')) == 'windows' else '' }}.yml"
         apply:
           become: true
       loop: "{{ new_vms }}"
@@ -135,7 +159,10 @@
         name: "{{ item.name }}"
         groups: ["lab", "lab_{{ item.role }}"]
         ansible_host: "{{ (item.nics | first).address }}"
-        ansible_user: "{{ vm_user }}"
+        ansible_user: "{{ vm_user_windows if (item.os | default('rhel')) == 'windows' else vm_user }}"
+        # WindowsはOpenSSH Server経由でもPowerShellをシェルとして使う(golden-autounattend.xmlで
+        # DefaultShellに設定済み)。ansible.builtin.raw/command/shellの実行形式がこれで変わる。
+        ansible_shell_type: "{{ 'powershell' if (item.os | default('rhel')) == 'windows' else 'sh' }}"
         ansible_ssh_common_args: "-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile={{ ssh_known_hosts_file }}"
         vm: "{{ item }}"
       loop: "{{ vms }}"
@@ -143,12 +170,25 @@
         label: "{{ item.name }}"
       changed_when: false
 
-    - name: Wait until SSH is up on every VM
+    - name: Wait until SSH is up on every RHEL VM
       ansible.builtin.wait_for:
         host: "{{ (item.nics | first).address }}"
         port: 22
         timeout: 900
-      loop: "{{ vms }}"
+      loop: "{{ vms | rejectattr('os', 'defined') | list }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    # Windowsは初回起動後にfirstbootスクリプトがコンピュータ名変更のため再起動をかける
+    # (kvm-install-windows.yml参照)。SSHが一瞬だけ応答してすぐ落ちる可能性があるため、
+    # 多少待ってから確認を始め、タイムアウトも長めに取る。
+    - name: Wait until SSH is up on every Windows VM
+      ansible.builtin.wait_for:
+        host: "{{ (item.nics | first).address }}"
+        port: 22
+        delay: 60
+        timeout: 1800
+      loop: "{{ vms | selectattr('os', 'defined') | selectattr('os', 'equalto', 'windows') | list }}"
       loop_control:
         label: "{{ item.name }}"
 
@@ -213,3 +253,44 @@
 
     - name: Register with Red Hat Subscription Management
       ansible.builtin.import_tasks: tasks/rhsm-workload.yml
+
+# WSUSはWindows業務VMの前提(Windows Updateのコンテンツ取得元)なので先に設定する。
+- name: Configure the WSUS server
+  hosts: lab_wsus
+  gather_facts: false
+
+  vars_files:
+    - vars.yml
+
+  vars:
+    vm_tags: "{{ {'Name': vm.name} | combine(vm.tags) }}"
+
+  tasks:
+    - name: Configure the hostname, timezone and SSH
+      ansible.builtin.import_tasks: tasks/common-windows.yml
+
+    - name: Register the VM with Systems Manager
+      ansible.builtin.import_tasks: tasks/ssm-agent-windows.yml
+
+    - name: Install and configure WSUS
+      ansible.builtin.import_tasks: tasks/wsus.yml
+
+- name: Configure the Windows workload VMs (test / stg / prod)
+  hosts: lab_workload-windows
+  gather_facts: false
+
+  vars_files:
+    - vars.yml
+
+  vars:
+    vm_tags: "{{ {'Name': vm.name} | combine(vm.tags) }}"
+
+  tasks:
+    - name: Configure the hostname, timezone and SSH
+      ansible.builtin.import_tasks: tasks/common-windows.yml
+
+    - name: Point Windows Update at the WSUS server
+      ansible.builtin.import_tasks: tasks/workload-windows.yml
+
+    - name: Register the VM with Systems Manager
+      ansible.builtin.import_tasks: tasks/ssm-agent-windows.yml

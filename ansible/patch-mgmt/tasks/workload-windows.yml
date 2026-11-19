@@ -1,0 +1,19 @@
+---
+# Windows業務VM(test-win/stg-win/prod-win)を、WSUSサーバーからWindows Updateを
+# 取得するように設定する。RHEL側のworkload.yml(infraのミラーを使う設定)に相当。
+#
+# 実際にどのパッチを入れるかはAWS Patch Managerのベースラインが決める。WSUSは
+# コンテンツの取得元を変えるだけで、承認の二重ゲートにはしていない(wsus.yml参照)。
+- name: Point Windows Update at the local WSUS server
+  ansible.builtin.raw: |
+    powershell -NoProfile -Command "
+    $regPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate'
+    $auPath = '$regPath\AU'
+    New-Item -Path $regPath -Force | Out-Null
+    New-Item -Path $auPath -Force | Out-Null
+    Set-ItemProperty -Path $regPath -Name WUServer -Value 'http://{{ wsus_workload_ip }}:8530'
+    Set-ItemProperty -Path $regPath -Name WUStatusServer -Value 'http://{{ wsus_workload_ip }}:8530'
+    Set-ItemProperty -Path $auPath -Name UseWUServer -Value 1 -Type DWord
+    Restart-Service wuauserv
+    "
+  changed_when: true

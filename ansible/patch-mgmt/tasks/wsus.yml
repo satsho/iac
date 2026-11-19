@@ -1,0 +1,89 @@
+---
+# WSUS(Windows Server Update Services)のインストールと設定。RHEL側のinfra.yml
+# (Red Hat CDNのミラー)に相当する、Windows Updateのローカルミラー役。
+# WSUS自体は「承認」機能を持つが、実際の適用可否はAWS Patch Managerのベースライン
+# (terraform/environments/patch-mgmt)側で既に制御しているため、ここでは対象の
+# 分類・製品を全て自動承認し、WSUSは「コンテンツの取得・配布」専任にする
+# (二重の承認ゲートを作らないため)。
+#
+# 前提: このVMには2枚目のデータディスクがvars.ymlのdata_size_gbで定義されていること
+# (コンテンツ保存先に使う)。
+
+- name: Install the WSUS Windows feature
+  ansible.builtin.raw: powershell -NoProfile -Command "Install-WindowsFeature UpdateServices -IncludeManagementTools"
+  register: wsus_feature_install
+  changed_when: "'Success' in wsus_feature_install.stdout"
+
+# vdbとしてアタッチされたデータディスク(kvm-finish.yml参照)をD:として初期化する。
+# 既に初期化済みなら何もしない。
+- name: Check whether the content drive is already initialized
+  ansible.builtin.raw: powershell -NoProfile -Command "if (Test-Path 'D:\WSUS') { 'present' } else { 'absent' }"
+  register: wsus_drive_check
+  changed_when: false
+
+- name: Initialize and format the content data disk
+  when: "'present' not in wsus_drive_check.stdout"
+  block:
+    - name: Initialize the raw data disk
+      ansible.builtin.raw: >-
+        powershell -NoProfile -Command
+        "Get-Disk | Where-Object PartitionStyle -eq 'RAW' | Initialize-Disk -PartitionStyle GPT -PassThru |
+        New-Partition -DriveLetter D -UseMaximumSize | Format-Volume -FileSystem NTFS -NewFileSystemLabel 'WSUS' -Confirm:$false"
+      changed_when: true
+
+    - name: Create the WSUS content directory
+      ansible.builtin.raw: powershell -NoProfile -Command "New-Item -Path 'D:\WSUS' -ItemType Directory -Force"
+      changed_when: true
+
+# WsusUtil.exe postinstallは1回しか実行できない(2回目はエラーになる)。既に設定済みかどうかを
+# WSUS管理コンソールの構成ファイルの有無で判定する。
+- name: Check whether WSUS post-install configuration already ran
+  ansible.builtin.raw: powershell -NoProfile -Command "if (Test-Path 'D:\WSUS\WsusContent') { 'present' } else { 'absent' }"
+  register: wsus_postinstall_check
+  changed_when: false
+
+- name: Run the WSUS post-install configuration
+  ansible.builtin.raw: >-
+    powershell -NoProfile -Command
+    "& \"$env:ProgramFiles\Update Services\Tools\WsusUtil.exe\" postinstall CONTENT_DIR=D:\WSUS"
+  when: "'present' not in wsus_postinstall_check.stdout"
+  changed_when: true
+
+# Windows Server 2025向けの分類(Critical/Security)だけを同期対象にし、全コンピュータに
+# 自動承認するルールを作る(存在しなければ作成、べき等)。
+- name: Configure synchronization and auto-approval
+  ansible.builtin.raw: |
+    powershell -NoProfile -Command "
+    Import-Module UpdateServices
+    $wsus = Get-WsusServer
+    $wsus.GetSubscription().SynchronizeAutomatically = $true
+    $wsus.GetSubscription().SynchronizeAutomaticallyTimeOfDay = (New-TimeSpan -Hours 1 -Minutes 0)
+    $wsus.GetSubscription().Save()
+    $wsus.GetUpdateClassifications() | Where-Object { $_.Title -in @('Critical Updates','Security Updates') } | ForEach-Object { $_.GetUpdateCategories() }
+    $subscription = $wsus.GetSubscription()
+    $classifications = $wsus.GetUpdateClassifications() | Where-Object { $_.Title -in @('Critical Updates','Security Updates') }
+    $subscription.SetUpdateClassifications($classifications)
+    $products = $wsus.GetUpdateCategories() | Where-Object { $_.Title -like '*Windows Server 2025*' }
+    if ($products) { $subscription.SetUpdateCategories($products) }
+    $subscription.Save()
+    $existingRule = $wsus.GetInstallApprovalRules() | Where-Object { $_.Name -eq 'patch-mgmt-auto-approve' }
+    if (-not $existingRule) { $existingRule = $wsus.CreateInstallApprovalRule('patch-mgmt-auto-approve') }
+    $existingRule.SetUpdateClassifications($classifications)
+    if ($products) { $existingRule.SetCategories($products) }
+    $allComputers = $wsus.GetComputerTargetGroups() | Where-Object { $_.Name -eq 'All Computers' }
+    $existingRule.SetComputerTargetGroups($allComputers)
+    $existingRule.Enabled = $true
+    $existingRule.Save()
+    "
+  changed_when: true
+
+- name: Allow the WSUS client port through the Windows Firewall
+  ansible.builtin.raw: >-
+    powershell -NoProfile -Command
+    "New-NetFirewallRule -Name wsus-client -DisplayName 'WSUS Client (8530)' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 8530
+    -ErrorAction SilentlyContinue"
+  changed_when: true
+
+- name: Trigger an initial synchronization
+  ansible.builtin.raw: powershell -NoProfile -Command "(Get-WsusServer).GetSubscription().StartSynchronization()"
+  changed_when: true

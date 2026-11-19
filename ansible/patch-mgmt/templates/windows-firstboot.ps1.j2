@@ -1,0 +1,27 @@
+# {{ vm.name }} 用の初回起動スクリプト。
+# virt-customizeの--firstboot-commandで、クローン直後・初回起動時に1回だけ実行される。
+# RHEL側のstatic-nic.nmconnection.j2(nmcli)に相当するが、Windowsはオフラインで
+# ネットワーク設定ファイルを直接書き込めないため、起動時にスクリプトとして実行する方式にしている。
+#
+# sysprepしていないため、コンピュータ名とSIDはゴールデンイメージと重複したまま
+# (自宅ラボはワークグループ構成でドメイン参加しないため実害なしという前提)。
+# Rename-Computerの効果を確定させるため、最後に1回再起動する。
+
+$ErrorActionPreference = "Stop"
+
+{% for nic in vm.nics %}
+{% set net = libvirt_networks | selectattr('name', 'equalto', nic.network) | first %}
+$mac = "{{ nic.mac | upper | replace(':', '-') }}"
+$adapter = Get-NetAdapter | Where-Object { $_.MacAddress -eq $mac }
+if ($adapter) {
+    $adapter | Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue
+    $adapter | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
+    $adapter | New-NetIPAddress -IPAddress "{{ nic.address }}" -PrefixLength {{ net.prefix }} {% if nic == vm.nics[0] %}-DefaultGateway "{{ net.address }}"{% endif %} | Out-Null
+    $adapter | Set-DnsClientServerAddress -ServerAddresses "{{ net.address }}"
+} else {
+    Write-Warning "NIC with MAC $mac not found (network: {{ nic.network }})"
+}
+{% endfor %}
+
+Rename-Computer -NewName "{{ vm.name }}" -Force
+Restart-Computer -Force

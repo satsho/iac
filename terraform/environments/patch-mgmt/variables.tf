@@ -70,6 +70,8 @@ variable "windows_patch_baselines" {
     test = { approve_after_days = 0 }
     stg  = { approve_after_days = 1 }
     prod = { approve_after_days = 2 }
+    # WSUSサーバ自身(patch-wsus)用。RHEL側のmgmt(patch_baselines)と同じ考え方
+    mgmt = { approve_after_days = 0 }
   }
 
   validation {

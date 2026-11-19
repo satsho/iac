@@ -1,0 +1,43 @@
+---
+# 全WindowsVM共通: タイムゾーン・SSH鍵登録・パスワード認証無効化(RHEL側common.ymlに相当)。
+#
+# WindowsにはデフォルトでPythonが入っておらず、ansible.builtin.copy/lineinfile/stat等の
+# 「新方式」モジュールはリモートにPythonが無いと動かない。このリポジトリは
+# ansible.windows等の追加コレクションに依存しない方針のため、Windowsを対象にする
+# タスクは全てansible.builtin.raw(PowerShellコマンドをそのままSSH経由で実行するだけで、
+# Python実行環境を一切要求しない)に統一している。
+
+- name: Set the timezone to match the maintenance windows
+  ansible.builtin.raw: powershell -NoProfile -Command "Set-TimeZone -Id 'Tokyo Standard Time'"
+  changed_when: true
+
+- name: Encode the operator's SSH public key
+  ansible.builtin.set_fact:
+    ssh_public_key_b64: "{{ lookup('ansible.builtin.file', ssh_public_key_file | expanduser) | b64encode }}"
+
+# Administratorsグループのメンバー向けの鍵ファイルは $env:ProgramData\ssh\administrators_authorized_keys
+# という専用パス(ユーザーごとの.ssh\authorized_keysではなく、OpenSSH on Windows特有の仕様)。
+- name: Register the SSH public key of the operator
+  ansible.builtin.raw: >-
+    powershell -NoProfile -Command
+    "[System.IO.File]::WriteAllText('C:\ProgramData\ssh\administrators_authorized_keys',
+    [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('{{ ssh_public_key_b64 }}')) + [Environment]::NewLine)"
+  changed_when: true
+
+# OpenSSH on WindowsはこのファイルのACLが緩いと起動時に無視する(sshdのログに
+# "bad permissions"と出て、鍵を登録したのに弾かれる)。継承を切ってSYSTEM/Administratorsだけに絞る。
+- name: Fix the ACL of administrators_authorized_keys
+  ansible.builtin.raw: >-
+    powershell -NoProfile -Command
+    "icacls.exe 'C:\ProgramData\ssh\administrators_authorized_keys' /inheritance:r;
+    icacls.exe 'C:\ProgramData\ssh\administrators_authorized_keys' /grant 'SYSTEM:F' /grant 'Administrators:F'"
+  changed_when: true
+
+# 鍵を登録したので、ISOの共通パスワードでのログインは止める(RHEL側common.ymlと同じ方針)。
+- name: Configure password logins over SSH
+  ansible.builtin.raw: >-
+    powershell -NoProfile -Command
+    "(Get-Content 'C:\ProgramData\ssh\sshd_config') -replace
+    '^#?PasswordAuthentication.*', 'PasswordAuthentication {{ 'yes' if ssh_password_authentication else 'no' }}'
+    | Set-Content 'C:\ProgramData\ssh\sshd_config'; Restart-Service sshd"
+  changed_when: true

@@ -1,0 +1,115 @@
+---
+# ssm-agent.yml(RHEL)のWindows版。AWS公式配布のAmazonSSMAgentSetup.exeをサイレントインストールし、
+# Hybrid Activationで登録してタグを同期する。installer自体はAWSのS3バケットから取得するだけで、
+# RHEL側のようなGPG署名検証ステップは無い(AWSのWindows向け配布にそのような手順が無いため)。
+#
+# WindowsにはPythonが入っていないため、Windows側で実行するコマンドは全てansible.builtin.raw
+# (common-windows.yml参照)。AWS CLIを呼ぶ部分(アクティベーション作成・タグ同期)は
+# RHEL版と同じくこのPlaybookを実行したユーザーの認証情報でdelegate_to: localhost実行する。
+
+- name: Check whether the SSM Agent service already exists
+  ansible.builtin.raw: powershell -NoProfile -Command "if (Get-Service AmazonSSMAgent -ErrorAction SilentlyContinue) { 'present' } else { 'absent' }"
+  register: ssm_service_check
+  changed_when: false
+
+- name: Install and register the SSM Agent
+  when: "'present' not in ssm_service_check.stdout"
+  block:
+    - name: Create a single-use SSM activation for this VM
+      ansible.builtin.command:
+        argv:
+          - aws
+          - ssm
+          - create-activation
+          - --region
+          - "{{ aws_region }}"
+          - --iam-role
+          - "{{ ssm_hybrid_role }}"
+          - --default-instance-name
+          - "{{ vm.name }}"
+          - --description
+          - "patch-mgmt lab VM {{ vm.name }}"
+          - --registration-limit
+          - "1"
+          - --tags
+          - "{{ vm_tags | dict2items(key_name='Key', value_name='Value') | to_json }}"
+          - --output
+          - json
+      delegate_to: localhost
+      connection: local
+      become: false
+      register: ssm_activation
+      changed_when: true
+      no_log: true
+
+    - name: Download the SSM Agent installer
+      ansible.builtin.raw: >-
+        powershell -NoProfile -Command
+        "Invoke-WebRequest -Uri 'https://amazon-ssm-{{ aws_region }}.s3.{{ aws_region }}.amazonaws.com/latest/windows_amd64/AmazonSSMAgentSetup.exe'
+        -OutFile 'C:\Windows\Temp\AmazonSSMAgentSetup.exe'"
+      changed_when: true
+
+    # ActivationCodeとActivationIdを取り違えると"must satisfy regular expression pattern"で
+    # 失敗する(CODE=短い英数字、ID=UUID形式)。過去にこの順序を間違えた教訓から、
+    # 変数名をそのままCODE=.../ID=...に対応させている。
+    - name: Install and register the SSM Agent silently
+      ansible.builtin.raw: >-
+        C:\Windows\Temp\AmazonSSMAgentSetup.exe /S /v"/qn
+        CODE={{ (ssm_activation.stdout | from_json).ActivationCode }}
+        ID={{ (ssm_activation.stdout | from_json).ActivationId }}
+        REGION={{ aws_region }}"
+      changed_when: true
+      no_log: true
+
+    - name: Remove the downloaded installer
+      ansible.builtin.raw: powershell -NoProfile -Command "Remove-Item -Path 'C:\Windows\Temp\AmazonSSMAgentSetup.exe' -Force -ErrorAction SilentlyContinue"
+      changed_when: false
+
+    # 登録が終わるまで少し待つ(インストーラのサイレント実行は、登録完了前に戻ってくることがある)
+    - name: Wait for the SSM Agent service to appear
+      ansible.builtin.raw: >-
+        powershell -NoProfile -Command
+        "for ($i=0; $i -lt 30; $i++) { if (Get-Service AmazonSSMAgent -ErrorAction SilentlyContinue) { break };
+        Start-Sleep -Seconds 2 }; (Get-Service AmazonSSMAgent).Status"
+      register: ssm_service_wait
+      changed_when: false
+
+# 登録済みのマネージドノードIDを読み出す(ファイルの正確な場所はRHEL(/var/lib/amazon/ssm/registration)
+# ほど確証が無いため、"registration"という名前のファイルをProgramData配下から検索する
+# 防御的な実装にしてある。見つからない場合はここで失敗するので、エージェントのログ
+# (C:\ProgramData\Amazon\SSM\Logs\amazon-ssm-agent.log)を確認すること。
+- name: Read the managed node ID
+  ansible.builtin.raw: >-
+    powershell -NoProfile -Command
+    "$f = Get-ChildItem -Path 'C:\ProgramData\Amazon\SSM' -Recurse -Filter 'registration' -ErrorAction SilentlyContinue | Select-Object -First 1;
+    if ($f) { (Get-Content $f.FullName | ConvertFrom-Json).ManagedInstanceID } else { '' }"
+  register: ssm_managed_instance_id_raw
+  changed_when: false
+
+- name: Fail when the managed node ID could not be found
+  ansible.builtin.assert:
+    that:
+      - ssm_managed_instance_id_raw.stdout | trim | length > 0
+    fail_msg: >-
+      マネージドノードIDが見つかりませんでした。SSM Agentのログ
+      (C:\ProgramData\Amazon\SSM\Logs\amazon-ssm-agent.log)を確認してください。
+
+# アクティベーションのタグは登録時にしか付かないので、vars.yml のタグを毎回マネージドノードに上書きする
+- name: Sync the tags of the managed node with vars.yml
+  ansible.builtin.command:
+    argv:
+      - aws
+      - ssm
+      - add-tags-to-resource
+      - --region
+      - "{{ aws_region }}"
+      - --resource-type
+      - ManagedInstance
+      - --resource-id
+      - "{{ ssm_managed_instance_id_raw.stdout | trim }}"
+      - --tags
+      - "{{ vm_tags | dict2items(key_name='Key', value_name='Value') | to_json }}"
+  delegate_to: localhost
+  connection: local
+  become: false
+  changed_when: false

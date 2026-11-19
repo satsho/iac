@@ -1,8 +1,11 @@
 # パッチ管理検証用VM(家のサーバのKVM)
 
 [`terraform/environments/patch-mgmt`](../../terraform/environments/patch-mgmt/README.md) で検証する
-5台の RHEL 10.2(repository / infra / test / stg / prod)を、家のサーバの KVM 上に作り、
-SSH で設定する playbook。設計(ネットワーク・仮想FW・パッチ適用の流れ)は Terraform 側の README を参照。
+RHEL 10.2 5台(repository / infra / test / stg / prod)とWindows Server 2025 4台
+(wsus / test-win / stg-win / prod-win)を、家のサーバの KVM 上に作り、SSH で設定する playbook。
+設計(ネットワーク・仮想FW・パッチ適用の流れ)は Terraform 側の README を参照。
+Windows側の構築方針(sysprepを使わない等)は[`packer/README.md`](packer/README.md)の
+「Windows側の構築方針」を参照。
 
 | ファイル | 内容 |
 |---|---|
@@ -46,6 +49,16 @@ VM作成は2段階になっている。**フルのOSインストールはゴー�
 マネージドノード(`mi-0abc...`)のタグになり、Terraform 側のメンテナンスウィンドウ
 (`PatchGroup=rhel10-test`)とパッチグループ(`rhel10-test`)の対象になる。
 タグは `vars.yml` を直して `site.yml` を流し直せば、マネージドノード側も書き換わる。
+Windows側(`patch-test-win`等)も同じ仕組みで、`PatchGroup=win2025-test`になる。
+
+4. **wsus**(SSH、Windows)
+   - SSH鍵の登録、パスワードでのSSHログインの停止、タイムゾーン
+   - SSM Agentのインストールと登録(MSIインストーラ、`ssm-agent-windows.yml`)、タグの同期
+   - WSUSロールのインストール・コンテンツディレクトリの初期化・同期対象(Windows Server 2025の
+     Critical/Security)の設定・全コンピュータ自動承認ルールの作成(`wsus.yml`)
+5. **test-win / stg-win / prod-win**(SSH、Windows)
+   - Windows UpdateのサーバーをWSUS(`wsus_workload_ip`)に向ける(`workload-windows.yml`)
+   - SSM Agentのインストールと登録、タグの同期
 
 ## 前提
 
@@ -54,14 +67,19 @@ VM作成は2段階になっている。**フルのOSインストールはゴー�
 - `libvirt` / `qemu-kvm` / `virt-install` / `qemu-img` / `aws`(AWS CLI v2)/ `ansible-core`
 - `sshpass`(初回だけ、VMにパスワードでSSHするため)
 - CPU が x86-64-v3 に対応していること(RHEL 10 の要件。AVX2 など。playbook で確認する)
-- メモリ: 4GB × 2(repository / infra)+ 2GB × 3 = 14GB
-- ディスク: ルート 20GB × 5 と、ミラー用データディスク 150GB × 2(使った分だけ増える qcow2)。
-  repository と infra に同じリポジトリが1式ずつ入るので、実際の使用量は「同期したリポジトリのサイズ × 2」+ α
+- メモリ: RHEL 4GB × 2(repository / infra)+ 2GB × 3(test/stg/prod)、Windows 4GB × 4
+  (wsus / test-win / stg-win / prod-win) = 30GB
+- ディスク: RHELルート 20GB × 5 + ミラー用データディスク 150GB × 2、Windowsルート 40GB × 4 +
+  WSUSコンテンツ用データディスク 100GB × 1(いずれも使った分だけ増える qcow2)
 - Image Builder で作った RHEL 10.2 のISO(Red Hat への自動登録あり、ユーザー `sho`(wheel))。
   これは `vars.yml` ではなく、[`packer/`](packer/README.md) でゴールデンイメージを
   ビルドする時にだけ使う(ISO自体はPackerの変数で渡す)
+- Windows Server 2025評価版のISO、virtio-win.iso(いずれもWindows版ゴールデンイメージの
+  ビルド時にだけ使う。[`packer/README.md`](packer/README.md)の「Windows側の構築方針」参照)
 - `osinfo-query os | grep rhel10` で `os_variant` の値が使えることを確認する(古い osinfo-db だと
-  `rhel10.0` が無いので、その場合はホストの osinfo-db を更新するか一番近い値にする)
+  `rhel10.0` が無いので、その場合はホストの osinfo-db を更新するか一番近い値にする)。
+  Windowsの`os_variant_windows`も同様に`osinfo-query os | grep -i "server 2025"`で確認する
+- `guestfs-winsupport` / `libguestfs-winsupport`(virt-customizeでWindowsイメージを編集するのに必要)
 - playbook を実行するユーザーの SSH 鍵(`vars.yml` の `ssh_public_key_file`)
 - `packer`(ゴールデンイメージのビルドに使う。[`packer/README.md`](packer/README.md)参照)
 
@@ -139,12 +157,26 @@ Host patch-stg
   HostName 192.168.151.22
 Host patch-prod
   HostName 192.168.151.23
+Host patch-wsus
+  HostName 192.168.150.12
+Host patch-test-win
+  HostName 192.168.151.24
+Host patch-stg-win
+  HostName 192.168.151.25
+Host patch-prod-win
+  HostName 192.168.151.26
+
+Host patch-wsus patch-test-win patch-stg-win patch-prod-win
+  User Administrator
 
 Host patch-*
   User sho
   ProxyJump home
   UserKnownHostsFile ~/.ssh/known_hosts_patch_mgmt
 ```
+
+(SSH configは上から順に最初にマッチした値を使うので、Windows機の`User Administrator`指定は
+`Host patch-*`の`User sho`より前に書くこと)
 
 ```bash
 ssh patch-test
@@ -224,3 +256,6 @@ playbook を使わずに VM を消すと、RHSM のシステムと SSM の `mi-.
 | 業務VMの SSM 登録・RHSM 登録が失敗する | KVMホストで `journalctl -k \| grep 'patch-mgmt-fw drop:'`(必要な宛先を落としていないか)と `nft list set inet patch_mgmt_fw https_v4`(許可リストに IP が入っているか) |
 | 許可リストが空のまま増えない | dnsmasq が SELinux に止められていないか(`ausearch -m avc -ts recent -c dnsmasq`)。playbook は `dnsmasq_use_ipset` を有効にしている |
 | SSM の操作が `InvalidSignatureException` などで失敗する | VM の時刻ずれ(`chronyc tracking`)。業務VMは仮想FWで許可した `rhel.pool.ntp.org` に合わせている |
+| Windows VMにSSHできない(クローン直後) | firstbootスクリプト(IP設定・コンピュータ名変更)の途中で再起動がかかるタイミングなので、数分待ってから再試行する。`virsh domifaddr <VM名>`でIPが変わっていないか、`virsh console <VM名>`でコンソールから起動状況を確認する |
+| `virt-customize`がWindowsイメージの編集で失敗する | `guestfs-winsupport`/`libguestfs-winsupport`がKVMホストに入っているか確認する |
+| WSUSのPowerShellコマンドレットでエラーになる | `UpdateServices`モジュールのAPI(`wsus.yml`)は実機未検証。コマンドレット名・プロパティ名がずれている可能性があるため、WSUS管理コンソール(リモートデスクトップ経由)で該当箇所を手動設定しても進められる |

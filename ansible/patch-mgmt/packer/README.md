@@ -80,3 +80,55 @@ rmdir /var/lib/libvirt/images/patch-mgmt-golden-build
 出力できないため)、`packer build`を再実行し、上の移動手順をもう一度行う。
 既存のVMは`destroy.yml`で消してから`site.yml`を流し直す(クローン元が変わる
 だけで、既に作られたVMのディスクには影響しない)。
+
+## Windows側の構築方針
+
+Windowsはsysprepを使わない。ゴールデンイメージは「OpenSSH Server有効化まで済んだ状態」で
+普通にシャットダウンし、クローン後はRHELと同じ発想(SSH経由のAnsibleで仕上げる)で
+コンピュータ名・固定IPを設定する。これにより**コンピュータ名・SIDがクローン間で重複する**
+(sysprepの`/generalize`をしないため)。ドメイン非参加のワークグループ構成で、
+SSH/SSMだけで管理する自宅ラボという前提では実害がほぼ無いと判断して、このやり方を
+選んでいる。ADドメインに参加させる、またはSMBでの名前解決に依存する用途には向かない。
+
+固定IP・コンピュータ名の変更は、クローンしたディスクに`virt-customize`の
+firstboot機能(Windows対応、内部的にはレジストリのRunOnce経由)でPowerShell
+スクリプトを仕込むことで実現している(`templates/windows-firstboot.ps1.j2`、
+`tasks/kvm-install-windows.yml`)。
+
+### 前提パッケージ(KVMホスト)
+
+```bash
+sudo dnf install -y guestfs-winsupport libguestfs-winsupport
+```
+
+これが無いと、`virt-customize`がWindowsイメージ(NTFS・レジストリ)を正しく編集できない。
+
+### ビルド
+
+```bash
+cd ansible/patch-mgmt/packer
+packer init windows2025-golden.pkr.hcl
+
+# ADMIN_PASSWORD_PLACEHOLDERを実際のパスワードに置き換えたコピーを作る(Gitにコミットしない)
+sed "s/ADMIN_PASSWORD_PLACEHOLDER/<password>/g" \
+  windows2025-golden-autounattend.xml > /tmp/autounattend-golden-rendered.xml
+
+packer build \
+  -var "iso_path=/var/lib/libvirt/images/windows-server-2025-eval.iso" \
+  -var "admin_password=<password>" \
+  -var "autounattend_path=/tmp/autounattend-golden-rendered.xml" \
+  windows2025-golden.pkr.hcl
+
+mv /var/lib/libvirt/images/patch-mgmt-golden-build-windows/windows2025-golden.qcow2 \
+   /var/lib/libvirt/images/patch-mgmt/
+rmdir /var/lib/libvirt/images/patch-mgmt-golden-build-windows
+rm /tmp/autounattend-golden-rendered.xml
+```
+
+これで`/var/lib/libvirt/images/patch-mgmt/windows2025-golden.qcow2`ができていれば、
+`site.yml`側の`golden_image_path_windows`のチェックを通る。
+
+**未検証の部分**: このWindows版パイプライン(Packerのssh通信、virt-customizeの
+Windows firstboot機能、WSUS関連のPowerShellスクリプト)は実機で動作確認できていない。
+実行してエラーが出た場合、特にvirt-customizeのfirstboot周りとWSUSのPowerShellコマンドレット
+(`UpdateServices`モジュール)の挙動を疑うこと。

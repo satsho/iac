@@ -1,0 +1,81 @@
+---
+# kvm-install.ymlのWindows版。ゴールデンイメージ(packer/windows2025-golden.pkr.hclで作成済み)を
+# クローンし、virt-customizeのfirstbootスクリプトで固定IP・コンピュータ名をクローンごとに設定する。
+#
+# 前提: KVMホストにguestfs-winsupportパッケージ(NTFS-3G・hivexによるWindowsイメージの
+# オフライン編集サポート)がインストール済みであること。無いとvirt-customizeの
+# --firstboot-commandがWindowsイメージに対して正しく動かない。
+#   sudo dnf install -y guestfs-winsupport libguestfs-winsupport || true
+- name: Check that the Windows golden image exists
+  ansible.builtin.stat:
+    path: "{{ golden_image_path_windows }}"
+  register: golden_image_windows
+
+- name: Fail when the Windows golden image is missing
+  ansible.builtin.assert:
+    that:
+      - golden_image_windows.stat.exists
+    fail_msg: >-
+      {{ golden_image_path_windows }} が無いので、先に ansible/patch-mgmt/packer で
+      `packer build windows2025-golden.pkr.hcl` を実行してゴールデンイメージを作ってください
+      (ansible/patch-mgmt/packer/README.md参照)。
+
+- name: Create the VM directory - {{ vm.name }}
+  ansible.builtin.file:
+    path: "{{ libvirt_image_dir }}/{{ vm.name }}"
+    state: directory
+    mode: "0711"
+
+- name: Clone the Windows golden image for the root disk - {{ vm.name }}
+  ansible.builtin.command:
+    argv:
+      - qemu-img
+      - create
+      - -f
+      - qcow2
+      - -F
+      - qcow2
+      - -b
+      - "{{ golden_image_path_windows }}"
+      - "{{ libvirt_image_dir }}/{{ vm.name }}/root.qcow2"
+    creates: "{{ libvirt_image_dir }}/{{ vm.name }}/root.qcow2"
+
+- name: Render the firstboot script - {{ vm.name }}
+  ansible.builtin.template:
+    src: windows-firstboot.ps1.j2
+    dest: "/tmp/{{ vm.name }}-firstboot.ps1"
+    mode: "0600"
+
+# virt-customizeはWindowsイメージに対して、起動時に1回だけ実行されるスクリプトを
+# 仕込める(Firstboot機能、内部的にはRunOnceレジストリ経由)。オフラインでレジストリ/
+# ファイルシステムを直接編集するため、ゲストを起動せずに済む(RHEL側のnmconnection
+# 書き込みと同じ考え方)。
+- name: Inject the firstboot script into the cloned disk - {{ vm.name }}
+  ansible.builtin.command:
+    cmd: >-
+      virt-customize -a {{ libvirt_image_dir }}/{{ vm.name }}/root.qcow2
+      --upload /tmp/{{ vm.name }}-firstboot.ps1:/Windows/Temp/firstboot.ps1
+      --firstboot-command 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\Windows\Temp\firstboot.ps1'
+  changed_when: true
+
+- name: Remove the rendered firstboot script - {{ vm.name }}
+  ansible.builtin.file:
+    path: "/tmp/{{ vm.name }}-firstboot.ps1"
+    state: absent
+
+- name: Define the VM from the cloned disk - {{ vm.name }}
+  ansible.builtin.command:
+    cmd: >-
+      virt-install
+      --name {{ vm.name }}
+      --memory {{ vm.memory_mb }}
+      --vcpus {{ vm.vcpus }}
+      --cpu host-passthrough
+      --os-variant {{ os_variant_windows }}
+      --import
+      --noreboot
+      --disk path={{ libvirt_image_dir }}/{{ vm.name }}/root.qcow2,bus=virtio
+      {% for nic in vm.nics %}--network network={{ nic.network }},mac={{ nic.mac }},model=virtio {% endfor %}
+      --graphics vnc,listen=127.0.0.1
+      --noautoconsole
+  changed_when: true

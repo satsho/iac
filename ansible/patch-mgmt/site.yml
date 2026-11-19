@@ -99,6 +99,12 @@
         mode: "0711"
       become: true
 
+    - name: Configure the scheduled start/stop of workload VMs
+      ansible.builtin.include_tasks:
+        file: tasks/vm-schedule.yml
+        apply:
+          become: true
+
     - name: Set up the egress firewall for the workload network
       ansible.builtin.include_tasks:
         file: tasks/kvm-firewall.yml

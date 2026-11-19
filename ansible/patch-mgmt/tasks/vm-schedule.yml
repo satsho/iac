@@ -1,0 +1,37 @@
+---
+# KVMホスト: 業務VM(test/stg/prod、RHEL+Windows)を平日日中だけ動かす。
+# ゲストVMの中には一切手を入れず、KVMホスト自身にsystemdタイマー2つ(開始・停止)を
+# 仕込むだけで完結する(vars.ymlのvm_schedule_roles/vm_schedule_start_calendar/
+# vm_schedule_stop_calendar参照)。
+
+- name: Pick the VMs that follow the start/stop schedule
+  ansible.builtin.set_fact:
+    scheduled_vm_names: "{{ vms | selectattr('role', 'in', vm_schedule_roles) | map(attribute='name') | list }}"
+
+- name: Deploy the scheduled start/stop scripts
+  ansible.builtin.template:
+    src: "vm-schedule-{{ item }}.sh.j2"
+    dest: "/usr/local/sbin/patch-mgmt-vms-{{ item }}.sh"
+    mode: "0755"
+  loop: [start, stop]
+
+- name: Deploy the systemd units for the scheduled start/stop
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: "0644"
+  loop:
+    - patch-mgmt-vms-start.service
+    - patch-mgmt-vms-start.timer
+    - patch-mgmt-vms-stop.service
+    - patch-mgmt-vms-stop.timer
+
+- name: Enable and start the start/stop timers
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  loop:
+    - patch-mgmt-vms-start.timer
+    - patch-mgmt-vms-stop.timer

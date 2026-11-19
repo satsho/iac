@@ -226,6 +226,27 @@ QuickSightのTerraform対応は薄いため、コンソールで手動設定す�
 2. Terraformのoutput`inventory_glue_database`のデータベースを選択
 3. `trivy_results`テーブルを選び、重大度(severity)別の件数や、インスタンス別の推移をグラフ化する
 
+## 業務VMの起動・停止スケジュール
+
+業務VM(test/stg/prod、RHEL+Windows)は平日の日中だけ動かし、夜間・週末は停止して
+電気代・リソースを節約する(`site.yml`の"Configure the scheduled start/stop of
+workload VMs"タスク、`tasks/vm-schedule.yml`)。repository/infra/wsusはミラー同期・SSM中継役
+なので対象外とし、常時稼働のままにする。
+
+実体はKVMホスト自身に仕込まれるsystemdタイマー2つで、ゲストVMの中には一切手を入れない:
+
+- `patch-mgmt-vms-start.timer`(デフォルト平日7:00): 停止中の対象VMを`virsh start`
+- `patch-mgmt-vms-stop.timer`(デフォルト平日23:00): 稼働中の対象VMを`virsh shutdown`(ACPI正常停止)
+
+対象VM・時刻は`vars.yml`の`vm_schedule_roles`/`vm_schedule_start_calendar`/
+`vm_schedule_stop_calendar`で変更できる(`OnCalendar`はKVMホストのタイムゾーン基準)。
+スケジュール外で臨時に使いたいときは普段通り`virsh start <VM名>`すればよく、次の
+`patch-mgmt-vms-stop.timer`発火時に止められる。状態確認:
+
+```bash
+systemctl list-timers 'patch-mgmt-vms-*'
+```
+
 ## 作り直す・消す
 
 `site.yml` は既にある VM を作り直さない。VM ごと作り直したいときは、その VM を消してから流し直す:

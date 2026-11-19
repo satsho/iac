@@ -223,3 +223,15 @@ vms:
     nics:
       - { network: patch-workload, mac: "52:54:00:15:01:26", address: 192.168.151.26 }
     tags: { Role: workload, Environment: prod, App: sample-app, PatchGroup: win2025-prod }
+
+# ---------------------------------------------------------------------------
+# 業務VMの起動・停止スケジュール
+# ---------------------------------------------------------------------------
+# 平日の日中だけ動かし、夜間・週末は停止して電気代・リソースを節約する
+# (KVMホスト自身のsystemdタイマーがvirsh start/shutdownを呼ぶ。tasks/vm-schedule.yml参照)。
+# role がここに含まれるVMだけが対象。repository/infra/wsusはミラー同期・SSM中継役なので
+# 対象外とし、常時稼働のままにする。
+vm_schedule_roles: [workload, workload-windows]
+# systemdのOnCalendar形式。KVMホスト自身のタイムゾーン(JST前提)で評価される。
+vm_schedule_start_calendar: "Mon..Fri 07:00:00"
+vm_schedule_stop_calendar: "Mon..Fri 23:00:00"

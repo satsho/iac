@@ -48,12 +48,19 @@ variable "admin_password" {
 
 # cd_filesで自動生成する一時ファイル。ADMIN_PASSWORD_PLACEHOLDERを実際の値に
 # 置き換えたコピーをbuild前に用意しておくこと(packer build前に下記を実行する):
+#   mkdir -p /tmp/windows2025-golden-seed
 #   sed "s/ADMIN_PASSWORD_PLACEHOLDER/<password>/g" \
-#     windows2025-golden-autounattend.xml > /tmp/autounattend-golden-rendered.xml
+#     windows2025-golden-autounattend.xml > /tmp/windows2025-golden-seed/autounattend.xml
+#
+# ファイル名は必ず"autounattend.xml"にすること。Windows SetupはCD/ISOのルートに
+# あるこの厳密なファイル名だけを自動検出する(ボリュームラベルのcd_labelは無関係)。
+# 違う名前だと応答ファイルが一切認識されず、完全手動インストールの扱いになる
+# (エディション選択の手動プロンプトが出る、ComputerNameが自動生成名になる、
+# AutoLogon/FirstLogonCommandsが実行されずsshdが永遠に起動しない、という形で現れる)。
 variable "autounattend_path" {
   type        = string
-  description = "パスワード置換済みのautounattend.xmlの絶対パス"
-  default     = "/tmp/autounattend-golden-rendered.xml"
+  description = "パスワード置換済みのautounattend.xmlの絶対パス(ファイル名は必ずautounattend.xmlにすること)"
+  default     = "/tmp/windows2025-golden-seed/autounattend.xml"
 }
 
 source "qemu" "windows2025_golden" {

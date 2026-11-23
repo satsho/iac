@@ -109,20 +109,25 @@ sudo dnf install -y guestfs-winsupport libguestfs-winsupport
 cd ansible/patch-mgmt/packer
 packer init windows2025-golden.pkr.hcl
 
-# ADMIN_PASSWORD_PLACEHOLDERを実際のパスワードに置き換えたコピーを作る(Gitにコミットしない)
+# ADMIN_PASSWORD_PLACEHOLDERを実際のパスワードに置き換えたコピーを作る(Gitにコミットしない)。
+# ファイル名は必ずautounattend.xmlにすること(Windows SetupがCD/ISOのルートで自動検出する
+# ファイル名が厳密にこれで、違う名前だと応答ファイルが一切認識されず完全手動インストール
+# 扱いになる。症状: エディション選択が手動プロンプトになる、ComputerNameが自動生成名のまま、
+# AutoLogon/FirstLogonCommandsが実行されずsshdが永遠に起動しない)。
+mkdir -p /tmp/windows2025-golden-seed
 sed "s/ADMIN_PASSWORD_PLACEHOLDER/<password>/g" \
-  windows2025-golden-autounattend.xml > /tmp/autounattend-golden-rendered.xml
+  windows2025-golden-autounattend.xml > /tmp/windows2025-golden-seed/autounattend.xml
 
 packer build \
   -var "iso_path=/var/lib/libvirt/images/windows-server-2025-eval.iso" \
   -var "admin_password=<password>" \
-  -var "autounattend_path=/tmp/autounattend-golden-rendered.xml" \
+  -var "autounattend_path=/tmp/windows2025-golden-seed/autounattend.xml" \
   windows2025-golden.pkr.hcl
 
 mv /var/lib/libvirt/images/patch-mgmt-golden-build-windows/windows2025-golden.qcow2 \
    /var/lib/libvirt/images/patch-mgmt/
 rmdir /var/lib/libvirt/images/patch-mgmt-golden-build-windows
-rm /tmp/autounattend-golden-rendered.xml
+rm -rf /tmp/windows2025-golden-seed
 ```
 
 これで`/var/lib/libvirt/images/patch-mgmt/windows2025-golden.qcow2`ができていれば、

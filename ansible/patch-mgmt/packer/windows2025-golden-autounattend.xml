@@ -12,8 +12,16 @@
   patch-mgmt/patch-workloadネットワーク(DHCP無し)とは無関係にビルド中は
   IPアドレスが振られ、Packerのssh通信ができる。
 
+  ディスク・NICともにWindows標準のインボックスドライバで動くデバイス
+  (disk_interface=ide、net_device=e1000。windows2025-golden.pkr.hcl参照)を
+  使っているため、virtio-win.isoからのドライバ読み込みは不要(以前は
+  Microsoft-Windows-PnpCustomizationsWinPEでD:/E:/F:のNetKVMドライバパスを
+  指定していたが、このビルドではvirtio-win.isoを接続しておらず存在しない
+  ドライブレターを参照することになり、WinPE起動直後のクラッシュ(Loading files
+  直後の一瞬の青画面→再起動ループ)の原因になっていたため削除した)。
+
   クローン後(site.yml実行時)は、kvm-install-windows.ymlがvirt-customizeの
-  --firstboot-commandで、クローンごとの固定IP設定・コンピュータ名変更を
+  firstboot-commandオプションで、クローンごとの固定IP設定・コンピュータ名変更を
   オフラインで注入する(templates/windows-firstboot.ps1.j2参照)。
 
   ComputerNameは意図的に汎用名のまま(どうせ全クローンでfirstbootスクリプトが
@@ -30,19 +38,6 @@
       <SystemLocale>ja-JP</SystemLocale>
       <UILanguage>ja-JP</UILanguage>
       <UserLocale>ja-JP</UserLocale>
-    </component>
-    <component name="Microsoft-Windows-PnpCustomizationsWinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
-      <DriverPaths>
-        <PathAndCredentials wcm:action="add" wcm:keyValue="1">
-          <Path>D:\NetKVM\2k22\amd64</Path>
-        </PathAndCredentials>
-        <PathAndCredentials wcm:action="add" wcm:keyValue="2">
-          <Path>E:\NetKVM\2k22\amd64</Path>
-        </PathAndCredentials>
-        <PathAndCredentials wcm:action="add" wcm:keyValue="3">
-          <Path>F:\NetKVM\2k22\amd64</Path>
-        </PathAndCredentials>
-      </DriverPaths>
     </component>
     <component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
       <UserData>

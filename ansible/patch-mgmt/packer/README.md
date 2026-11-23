@@ -95,6 +95,15 @@ firstboot機能(Windows対応、内部的にはレジストリのRunOnce経由)�
 スクリプトを仕込むことで実現している(`templates/windows-firstboot.ps1.j2`、
 `tasks/kvm-install-windows.yml`)。
 
+ディスク(`disk_interface`)・NIC(`net_device`)は、Windows標準のインボックス
+ドライバで動く`ide`/`e1000`にしている(`virtio`だとvirtio-win.isoからの
+ドライバ読み込みが必要になり、Packerの`qemuargs`に自分で`-drive`を追加すると
+ビルダーが自動生成する`-drive`(ディスク本体・インストーラISO・autounattend ISO)
+が全部差し替わってしまう既知の問題にぶつかるため)。CPUには`virt-install`が
+Windowsゲスト向けに自動付与するのと同じHyper-V準仮想化拡張(`hv-time`等、
+実際に動いている`patch-test-win`の起動コマンドから採取)を`qemuargs`で明示的に
+渡している(無いと早期ブート時にクラッシュ→再起動ループすることがあった)。
+
 ### 前提パッケージ(KVMホスト)
 
 ```bash
@@ -133,7 +142,8 @@ rm -rf /tmp/windows2025-golden-seed
 これで`/var/lib/libvirt/images/patch-mgmt/windows2025-golden.qcow2`ができていれば、
 `site.yml`側の`golden_image_path_windows`のチェックを通る。
 
-**未検証の部分**: このWindows版パイプライン(Packerのssh通信、virt-customizeの
-Windows firstboot機能、WSUS関連のPowerShellスクリプト)は実機で動作確認できていない。
-実行してエラーが出た場合、特にvirt-customizeのfirstboot周りとWSUSのPowerShellコマンドレット
-(`UpdateServices`モジュール)の挙動を疑うこと。
+**未検証の部分**: virt-customizeのWindows firstboot機能、WSUS関連のPowerShellスクリプト
+(`UpdateServices`モジュール)は実機で動作確認できていない。また、`qemuargs`のhv-*拡張が
+WinPE起動直後のクラッシュ→再起動ループを解消するかどうかも実機検証中。実行してエラーが
+出た場合は、まずVNCでインストール画面を直接見て、どの段階(WinPE起動/ディスク選択/
+ファイルコピー/OOBE/FirstLogonCommands)で止まっているかを確認すること。

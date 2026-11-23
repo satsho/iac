@@ -21,12 +21,6 @@ variable "iso_path" {
   default     = "/var/lib/libvirt/images/windows-server-2025-eval.iso"
 }
 
-variable "virtio_iso_path" {
-  type        = string
-  description = "virtio-win.iso(NICドライバ等)の絶対パス"
-  default     = "/var/lib/libvirt/images/virtio-win.iso"
-}
-
 # rhel10-golden.pkr.hclと同じ理由で、まだ存在しないディレクトリである必要がある
 variable "output_directory" {
   type    = string
@@ -75,14 +69,19 @@ source "qemu" "windows2025_golden" {
   qemu_binary = var.qemu_binary
   memory      = 4096
   cpus        = 2
+  # hv-*はvirt-install(--os-variant win*)が自動で付けるHyper-V準仮想化拡張と同じもの
+  # (実際に動いているpatch-test-winの起動コマンドから採取)。これが無いと、最近のWindowsは
+  # 早期ブート時のタイミング関連で不安定になりクラッシュすることがある。
+  # qemuargsに"-drive"を自分で追加すると、ビルダーが自動生成する"-drive"
+  # (ディスク本体・インストーラISO・autounattend ISO)が全部それに差し替わってしまう
+  # (同名フラグの衝突)。なので"-drive"はここに書かず、ディスク/NIC自体をide/e1000
+  # (virtio-win.isoのドライバ無しで動くWindows標準のインボックスドライバ)にしている。
   qemuargs = [
-    ["-cpu", "host"],
-    # virtio-win.isoを2枚目のCD-ROMとして追加(WinPEのNICドライバ読み込み用)
-    ["-drive", "file=${var.virtio_iso_path},media=cdrom"]
+    ["-cpu", "host,hv-time=on,hv-relaxed=on,hv-vapic=on,hv-spinlocks=0x1fff,hv-vpindex=on,hv-runtime=on,hv-synic=on,hv-stimer=on,hv-frequencies=on,hv-tlbflush=on,hv-ipi=on,hv-evmcs=on,hv-avic=on"]
   ]
 
-  net_device     = "virtio-net"
-  disk_interface = "virtio"
+  net_device     = "e1000"
+  disk_interface = "ide"
 
   headless  = true
   boot_wait = "5s"

@@ -106,6 +106,12 @@ source "qemu" "windows2025_golden" {
   headless  = true
   boot_wait = "5s"
 
+  # VNCのポートをビルドのたびに変えないよう固定する(デバッグ中に毎回ポート番号を
+  # 調べ直さなくて済むように)。rancher上の他の用途と重複しない空きポートを選んでいる。
+  vnc_bind_address = "127.0.0.1"
+  vnc_port_min     = 5999
+  vnc_port_max     = 5999
+
   # autounattend.xmlとNetKVMドライバを1枚のISOにまとめて3枚目のCD-ROMとして付ける
   # (手動のgenisoimageステップが不要になる)
   cd_files = [var.autounattend_path, var.netkvm_driver_path]

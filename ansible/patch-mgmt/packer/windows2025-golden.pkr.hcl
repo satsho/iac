@@ -57,6 +57,22 @@ variable "autounattend_path" {
   default     = "/tmp/windows2025-golden-seed/autounattend.xml"
 }
 
+# virtio-win.isoからNetKVM\2k25フォルダをコピーしておくディレクトリ
+# (packer build前に下記を実行する):
+#   mkdir -p /tmp/windows2025-golden-seed/NetKVM
+#   sudo mount -o loop /var/lib/libvirt/images/virtio-win.iso /mnt/virtio-win
+#   cp -r /mnt/virtio-win/NetKVM/2k25 /tmp/windows2025-golden-seed/NetKVM/
+#   sudo umount /mnt/virtio-win
+#
+# autounattend.xmlと同じcd_filesにまとめて1枚のISOにする(qemuargsに自分で
+# "-drive"を追加するとビルダー自動生成分と衝突するため、2枚目のCD-ROMを別途
+# 追加する代わりにこの方法を取っている)。
+variable "netkvm_driver_path" {
+  type        = string
+  description = "virtio-win.isoからコピーしたNetKVMドライバフォルダの絶対パス"
+  default     = "/tmp/windows2025-golden-seed/NetKVM"
+}
+
 source "qemu" "windows2025_golden" {
   iso_url      = "file://${var.iso_path}"
   iso_checksum = "none"
@@ -74,21 +90,25 @@ source "qemu" "windows2025_golden" {
   # 早期ブート時のタイミング関連で不安定になりクラッシュすることがある。
   # qemuargsに"-drive"を自分で追加すると、ビルダーが自動生成する"-drive"
   # (ディスク本体・インストーラISO・autounattend ISO)が全部それに差し替わってしまう
-  # (同名フラグの衝突)。なので"-drive"はここに書かず、ディスク/NIC自体をide/e1000
-  # (virtio-win.isoのドライバ無しで動くWindows標準のインボックスドライバ)にしている。
+  # (同名フラグの衝突)。なので"-drive"はここに書かず、virtio-net用のドライバは
+  # cd_filesでautounattend.xmlと同じISOに同梱する方式にしている(下記参照)。
   qemuargs = [
     ["-cpu", "host,hv-time=on,hv-relaxed=on,hv-vapic=on,hv-spinlocks=0x1fff,hv-vpindex=on,hv-runtime=on,hv-synic=on,hv-stimer=on,hv-frequencies=on,hv-tlbflush=on,hv-ipi=on,hv-evmcs=on,hv-avic=on"]
   ]
 
-  net_device     = "e1000"
+  # NICはvirtio-net(実際に動いているpatch-test-winと同じ構成に合わせた。e1000だと
+  # WinPE起動直後にクラッシュ→再起動ループする問題があった)。virtio-netはWindows標準の
+  # インボックスドライバが無いため、NetKVMドライバをcd_filesでautounattend.xmlと
+  # 同じISOに同梱し、autounattend.xml側のDriverPathsで読み込む。
+  net_device     = "virtio-net"
   disk_interface = "ide"
 
   headless  = true
   boot_wait = "5s"
 
-  # autounattend.xmlを自動で小さなISOにまとめて3枚目のCD-ROMとして付ける
+  # autounattend.xmlとNetKVMドライバを1枚のISOにまとめて3枚目のCD-ROMとして付ける
   # (手動のgenisoimageステップが不要になる)
-  cd_files = [var.autounattend_path]
+  cd_files = [var.autounattend_path, var.netkvm_driver_path]
   cd_label = "autounattend"
 
   output_directory = var.output_directory

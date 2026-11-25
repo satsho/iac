@@ -74,9 +74,9 @@ Windows側(`patch-test-win`等)も同じ仕組みで、`PatchGroup=win2025-test`
 - Image Builder で作った RHEL 10.2 のISO(Red Hat への自動登録あり、ユーザー `sho`(wheel))。
   これは `vars.yml` ではなく、[`packer/`](packer/README.md) でゴールデンイメージを
   ビルドする時にだけ使う(ISO自体はPackerの変数で渡す)
-- Windows Server 2025評価版のISO(Windows版ゴールデンイメージのビルド時にだけ使う。
-  ディスク/NICはide/e1000(Windows標準のインボックスドライバ)で動かすのでvirtio-win.isoは
-  不要。[`packer/README.md`](packer/README.md)の「Windows側の構築方針」参照)
+- Windows Server 2025評価版のISO、virtio-win.iso(いずれもWindows版ゴールデンイメージの
+  ビルド時にだけ使う。ディスクはide、NICはvirtio-net(NetKVMドライバをautounattend.xmlと
+  同じCD-ROMに同梱)。[`packer/README.md`](packer/README.md)の「Windows側の構築方針」参照)
 - `osinfo-query os | grep rhel10` で `os_variant` の値が使えることを確認する(古い osinfo-db だと
   `rhel10.0` が無いので、その場合はホストの osinfo-db を更新するか一番近い値にする)。
   Windowsの`os_variant_windows`も同様に`osinfo-query os | grep -i "server 2025"`で確認する

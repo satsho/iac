@@ -48,10 +48,19 @@
       </UserData>
       <ImageInstall>
         <OSImage>
+          <!--
+            評価版ISOのinstall.wimには複数のエディション(Standard/Datacenter × Core/
+            Desktop Experience)が入っており、/IMAGE/INDEXの数値指定は取り違えやすい
+            (実際にwiminfo相当の方法でinstall.wimを調べたところ、index 2はServer Core、
+            Desktop ExperienceはNo.3以降だった)。確実なISOから直接読み取った正確な
+            WIM名で/IMAGE/NAMEを指定する(Desktop Experience = EDITIONID ServerStandardEval
+            かつ INSTALLATIONTYPE が"Server Core"ではなく"Server"の方、NAME=
+            "Windows Server 2025 SERVERSTANDARD")。
+          -->
           <InstallFrom>
             <MetaData wcm:action="add">
-              <Key>/IMAGE/INDEX</Key>
-              <Value>2</Value>
+              <Key>/IMAGE/NAME</Key>
+              <Value>Windows Server 2025 SERVERSTANDARD</Value>
             </MetaData>
           </InstallFrom>
           <InstallTo>

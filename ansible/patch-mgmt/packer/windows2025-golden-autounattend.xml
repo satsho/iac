@@ -12,8 +12,17 @@
   patch-mgmt/patch-workloadネットワーク(DHCP無し)とは無関係にビルド中は
   IPアドレスが振られ、Packerのssh通信ができる。
 
+  ディスクはWindows標準のインボックスドライバで動くide(disk_interface=ide)。
+  NICはvirtio-net(net_device=virtio-net。実際に動いているpatch-test-winと同じ
+  構成に合わせた。e1000はWinPE起動直後にクラッシュ→再起動ループする問題があった)。
+  virtio-netにはインボックスドライバが無いため、NetKVMドライバをautounattend.xmlと
+  同じCD-ROMに同梱している(windows2025-golden.pkr.hclのcd_files参照。qemuargsに
+  自分で"-drive"を追加するとビルダー自動生成分と衝突するため、2枚目のCD-ROMを
+  別途追加する代わりにこの方法を取っている)。ドライブレターは複数のCD-ROMの
+  割り当て順に依存し確実ではないため、下のDriverPathsはD:/E:/F:を全て試す。
+
   クローン後(site.yml実行時)は、kvm-install-windows.ymlがvirt-customizeの
-  --firstboot-commandで、クローンごとの固定IP設定・コンピュータ名変更を
+  firstboot-commandオプションで、クローンごとの固定IP設定・コンピュータ名変更を
   オフラインで注入する(templates/windows-firstboot.ps1.j2参照)。
 
   ComputerNameは意図的に汎用名のまま(どうせ全クローンでfirstbootスクリプトが
@@ -34,13 +43,13 @@
     <component name="Microsoft-Windows-PnpCustomizationsWinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
       <DriverPaths>
         <PathAndCredentials wcm:action="add" wcm:keyValue="1">
-          <Path>D:\NetKVM\2k22\amd64</Path>
+          <Path>D:\NetKVM\2k25\amd64</Path>
         </PathAndCredentials>
         <PathAndCredentials wcm:action="add" wcm:keyValue="2">
-          <Path>E:\NetKVM\2k22\amd64</Path>
+          <Path>E:\NetKVM\2k25\amd64</Path>
         </PathAndCredentials>
         <PathAndCredentials wcm:action="add" wcm:keyValue="3">
-          <Path>F:\NetKVM\2k22\amd64</Path>
+          <Path>F:\NetKVM\2k25\amd64</Path>
         </PathAndCredentials>
       </DriverPaths>
     </component>
@@ -53,10 +62,19 @@
       </UserData>
       <ImageInstall>
         <OSImage>
+          <!--
+            評価版ISOのinstall.wimには複数のエディション(Standard/Datacenter × Core/
+            Desktop Experience)が入っており、/IMAGE/INDEXの数値指定は取り違えやすい
+            (実際にwiminfo相当の方法でinstall.wimを調べたところ、index 2はServer Core、
+            Desktop ExperienceはNo.3以降だった)。確実なISOから直接読み取った正確な
+            WIM名で/IMAGE/NAMEを指定する(Desktop Experience = EDITIONID ServerStandardEval
+            かつ INSTALLATIONTYPE が"Server Core"ではなく"Server"の方、NAME=
+            "Windows Server 2025 SERVERSTANDARD")。
+          -->
           <InstallFrom>
             <MetaData wcm:action="add">
-              <Key>/IMAGE/INDEX</Key>
-              <Value>2</Value>
+              <Key>/IMAGE/NAME</Key>
+              <Value>Windows Server 2025 SERVERSTANDARD</Value>
             </MetaData>
           </InstallFrom>
           <InstallTo>

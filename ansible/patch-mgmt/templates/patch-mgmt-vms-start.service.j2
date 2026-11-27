@@ -1,0 +1,9 @@
+# Ansible管理(ansible/patch-mgmt/templates/patch-mgmt-vms-start.service.j2)。手で編集しても次回上書きされる。
+[Unit]
+Description=patch-mgmt workload VMs - scheduled start
+After=libvirtd.service
+Requires=libvirtd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/patch-mgmt-vms-start.sh

@@ -95,6 +95,18 @@ firstboot機能(Windows対応、内部的にはレジストリのRunOnce経由)�
 スクリプトを仕込むことで実現している(`templates/windows-firstboot.ps1.j2`、
 `tasks/kvm-install-windows.yml`)。
 
+ディスク(`disk_interface`)は`ide`(Windows標準のインボックスドライバで動く)。
+NIC(`net_device`)は`virtio-net`(実際に動いている`patch-test-win`と同じ構成に
+合わせた。`e1000`だとWinPE起動直後に原因不明のクラッシュ→再起動ループが
+発生した)。`virtio-net`にはインボックスドライバが無いため、virtio-win.isoの
+NetKVMドライバをautounattend.xmlと**同じCD-ROM**に`cd_files`で同梱している
+(Packerの`qemuargs`に自分で`-drive`を追加すると、ビルダーが自動生成する
+`-drive`(ディスク本体・インストーラISO・autounattend ISO)が全部差し替わって
+しまう既知の問題があり、2枚目のCD-ROMを素朴に追加する方法が使えないため)。
+CPUには`virt-install`がWindowsゲスト向けに自動付与するのと同じHyper-V準仮想化
+拡張(`hv-time`等、実際に動いている`patch-test-win`の起動コマンドから採取)を
+`qemuargs`で明示的に渡している。
+
 ### 前提パッケージ(KVMホスト)
 
 ```bash
@@ -109,26 +121,40 @@ sudo dnf install -y guestfs-winsupport libguestfs-winsupport
 cd ansible/patch-mgmt/packer
 packer init windows2025-golden.pkr.hcl
 
-# ADMIN_PASSWORD_PLACEHOLDERを実際のパスワードに置き換えたコピーを作る(Gitにコミットしない)
+# ADMIN_PASSWORD_PLACEHOLDERを実際のパスワードに置き換えたコピーを作る(Gitにコミットしない)。
+# ファイル名は必ずautounattend.xmlにすること(Windows SetupがCD/ISOのルートで自動検出する
+# ファイル名が厳密にこれで、違う名前だと応答ファイルが一切認識されず完全手動インストール
+# 扱いになる。症状: エディション選択が手動プロンプトになる、ComputerNameが自動生成名のまま、
+# AutoLogon/FirstLogonCommandsが実行されずsshdが永遠に起動しない)。
+mkdir -p /tmp/windows2025-golden-seed
 sed "s/ADMIN_PASSWORD_PLACEHOLDER/<password>/g" \
-  windows2025-golden-autounattend.xml > /tmp/autounattend-golden-rendered.xml
+  windows2025-golden-autounattend.xml > /tmp/windows2025-golden-seed/autounattend.xml
+
+# NICはvirtio-net(実際に動いているpatch-test-winと同じ構成。e1000だとWinPE起動直後に
+# クラッシュ→再起動ループする問題があった)。インボックスドライバが無いので、
+# virtio-win.isoのNetKVMドライバをautounattend.xmlと同じCD-ROMに同梱する。
+mkdir -p /tmp/windows2025-golden-seed/NetKVM
+sudo mount -o loop /var/lib/libvirt/images/virtio-win.iso /mnt/virtio-win
+cp -r /mnt/virtio-win/NetKVM/2k25 /tmp/windows2025-golden-seed/NetKVM/
+sudo umount /mnt/virtio-win
 
 packer build \
   -var "iso_path=/var/lib/libvirt/images/windows-server-2025-eval.iso" \
   -var "admin_password=<password>" \
-  -var "autounattend_path=/tmp/autounattend-golden-rendered.xml" \
+  -var "autounattend_path=/tmp/windows2025-golden-seed/autounattend.xml" \
   windows2025-golden.pkr.hcl
 
 mv /var/lib/libvirt/images/patch-mgmt-golden-build-windows/windows2025-golden.qcow2 \
    /var/lib/libvirt/images/patch-mgmt/
 rmdir /var/lib/libvirt/images/patch-mgmt-golden-build-windows
-rm /tmp/autounattend-golden-rendered.xml
+rm -rf /tmp/windows2025-golden-seed
 ```
 
 これで`/var/lib/libvirt/images/patch-mgmt/windows2025-golden.qcow2`ができていれば、
 `site.yml`側の`golden_image_path_windows`のチェックを通る。
 
-**未検証の部分**: このWindows版パイプライン(Packerのssh通信、virt-customizeの
-Windows firstboot機能、WSUS関連のPowerShellスクリプト)は実機で動作確認できていない。
-実行してエラーが出た場合、特にvirt-customizeのfirstboot周りとWSUSのPowerShellコマンドレット
-(`UpdateServices`モジュール)の挙動を疑うこと。
+**未検証の部分**: virt-customizeのWindows firstboot機能、WSUS関連のPowerShellスクリプト
+(`UpdateServices`モジュール)は実機で動作確認できていない。また、`qemuargs`のhv-*拡張が
+WinPE起動直後のクラッシュ→再起動ループを解消するかどうかも実機検証中。実行してエラーが
+出た場合は、まずVNCでインストール画面を直接見て、どの段階(WinPE起動/ディスク選択/
+ファイルコピー/OOBE/FirstLogonCommands)で止まっているかを確認すること。

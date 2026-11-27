@@ -1,0 +1,10 @@
+# Ansible管理(ansible/patch-mgmt/templates/patch-mgmt-vms-start.timer.j2)。手で編集しても次回上書きされる。
+[Unit]
+Description=patch-mgmt workload VMs - scheduled start timer
+
+[Timer]
+OnCalendar={{ vm_schedule_start_calendar }}
+Persistent=false
+
+[Install]
+WantedBy=timers.target

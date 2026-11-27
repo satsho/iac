@@ -1,0 +1,23 @@
+# argocd.focus4.netのホスト名をArgoCD Serverに割り当てる。
+# ArgoCD Server自体はargocd-cmd-params-cmで--insecure(TLS終端無し、平文HTTP)に
+# 設定済みであること(TraefikのGateway側でTLSを終端してバックエンドには平文で渡すため。
+# --insecureが無いとargocd-serverがHTTPSへリダイレクトし続けてループする)。
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: argocd
+  namespace: argocd
+spec:
+  hostnames:
+    - argocd.focus4.net
+  parentRefs:
+    - name: traefik-gateway
+      namespace: default
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: argocd-server
+          port: 80

@@ -1,0 +1,12 @@
+#!/bin/bash
+# Ansible管理(ansible/patch-mgmt/templates/vm-schedule-start.sh.j2)。手で編集しても次回上書きされる。
+#
+# 平日朝、停止中の業務VMだけを起動する(既に起動しているVMには何もしない)。
+set -euo pipefail
+
+for vm in {{ scheduled_vm_names | join(' ') }}; do
+  state="$(virsh domstate "${vm}" 2>/dev/null || echo 'not found')"
+  if [ "${state}" = "shut off" ]; then
+    virsh start "${vm}"
+  fi
+done

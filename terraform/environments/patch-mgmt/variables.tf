@@ -144,16 +144,16 @@ variable "maintenance_windows" {
   }))
   default = {
     test-weekly = {
-      description = "test: 毎週火曜 08:00。承認0日、自動再起動"
-      schedule    = "cron(0 8 ? * TUE *)"
+      description = "test: 毎週土曜 08:00。承認0日、自動再起動"
+      schedule    = "cron(0 8 ? * SAT *)"
       target_tags = { PatchGroup = ["rhel10-test"] }
       # ゲートは無いが、変更カレンダーのチェックのためAUTOMATION(GatedPatchBaseline、gate未設定)を使う
       task_type     = "AUTOMATION"
       reboot_option = "RebootIfNeeded"
     }
     stg-weekly = {
-      description   = "stg: 毎週水曜 08:00(testの1日後)。承認1日、testの成功が前提、自動再起動"
-      schedule      = "cron(0 8 ? * WED *)"
+      description   = "stg: 毎週土曜 10:00(testの1日後)。承認1日、testの成功が前提、自動再起動"
+      schedule      = "cron(0 8 ? * SAT *)"
       target_tags   = { PatchGroup = ["rhel10-stg"] }
       task_type     = "AUTOMATION"
       reboot_option = "RebootIfNeeded"
@@ -164,8 +164,8 @@ variable "maintenance_windows" {
       }
     }
     prod-weekly = {
-      description   = "prod: 毎週金曜 08:00(stgの2日後)。承認2日、stgの成功が前提、再起動は手動"
-      schedule      = "cron(0 8 ? * FRI *)"
+      description   = "prod: 毎週土曜 12:00(stgの2日後)。承認2日、stgの成功が前提、再起動は手動"
+      schedule      = "cron(0 8 ? * SAT *)"
       target_tags   = { PatchGroup = ["rhel10-prod"] }
       task_type     = "AUTOMATION"
       reboot_option = "NoReboot"

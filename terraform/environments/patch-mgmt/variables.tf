@@ -153,7 +153,7 @@ variable "maintenance_windows" {
     }
     stg-weekly = {
       description   = "stg: 毎週土曜 10:00(testの1日後)。承認1日、testの成功が前提、自動再起動"
-      schedule      = "cron(0 8 ? * SAT *)"
+      schedule      = "cron(0 10 ? * SAT *)"
       target_tags   = { PatchGroup = ["rhel10-stg"] }
       task_type     = "AUTOMATION"
       reboot_option = "RebootIfNeeded"
@@ -165,7 +165,7 @@ variable "maintenance_windows" {
     }
     prod-weekly = {
       description   = "prod: 毎週土曜 12:00(stgの2日後)。承認2日、stgの成功が前提、再起動は手動"
-      schedule      = "cron(0 8 ? * SAT *)"
+      schedule      = "cron(0 12 ? * SAT *)"
       target_tags   = { PatchGroup = ["rhel10-prod"] }
       task_type     = "AUTOMATION"
       reboot_option = "NoReboot"

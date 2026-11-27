@@ -121,9 +121,11 @@ upstream_repos:
 # systemdのOnCalendar形式(timezone基準)
 reposync_schedule: "*-*-* 00:00:00"
 mirror_sync_schedule: "*-*-* 01:00:00"
-# 各VMのSSM Inventory収集(Terraformのinventory_schedule、デフォルトJST 02:00)の後、
-# Glueクローラ(Terraformのinventory_crawler_schedule、デフォルトJST 03:00)の前に流す
-trivy_scan_schedule: "*-*-* 02:30:00"
+# 各VMのSSM Inventory収集(Terraformのinventory_schedule、デフォルトJST 08:15)の後、
+# Glueクローラ(Terraformのinventory_crawler_schedule、デフォルトJST 09:00)の前に流す。
+# test/stg/prodは平日7時〜23時だけ起動するため(vm_schedule_start_calendar/
+# vm_schedule_stop_calendar)、VM停止時間帯(23時〜7時)には設定しないこと。
+trivy_scan_schedule: "*-*-* 08:30:00"
 
 # ---------------------------------------------------------------------------
 # VM

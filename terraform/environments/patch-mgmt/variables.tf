@@ -81,21 +81,30 @@ variable "windows_patch_baselines" {
 }
 
 variable "patch_scan_schedule" {
-  description = "全サーバのパッチスキャン(State Managerの関連付け)のスケジュール。関連付けのcron式はUTC固定なので注意(デフォルトはJST 01:30)"
+  description = <<-EOT
+    全サーバのパッチスキャン(State Managerの関連付け)のスケジュール。関連付けのcron式はUTC固定なので注意
+    (デフォルトはJST 08:00)。test/stg/prod(RHEL+Windows)は平日7時〜23時だけ起動する
+    スケジュールになっている(vars.ymlのvm_schedule_start_calendar/vm_schedule_stop_calendar)ため、
+    VMが停止している時間帯(23時〜7時)には設定しないこと。
+  EOT
   type        = string
-  default     = "cron(30 16 * * ? *)"
+  default     = "cron(0 23 * * ? *)"
 }
 
 variable "inventory_schedule" {
-  description = "全サーバのインストール済みパッケージ一覧収集(SSM Inventory)のスケジュール。関連付けのcron式はUTC固定(デフォルトはJST 02:00)"
+  description = <<-EOT
+    全サーバのインストール済みパッケージ一覧収集(SSM Inventory)のスケジュール。関連付けのcron式は
+    UTC固定(デフォルトはJST 08:15)。patch_scan_scheduleと同じ理由でVM停止時間帯(23時〜7時)には
+    設定しないこと。
+  EOT
   type        = string
-  default     = "cron(0 17 * * ? *)"
+  default     = "cron(15 23 * * ? *)"
 }
 
 variable "inventory_crawler_schedule" {
-  description = "Inventory/trivyの結果をAthenaでクエリできるようにするGlueクローラのスケジュール(cron式はUTC固定)。毎日のインベントリ収集・trivyスキャンの後に走らせる(デフォルトはJST 03:00)"
+  description = "Inventory/trivyの結果をAthenaでクエリできるようにするGlueクローラのスケジュール(cron式はUTC固定、AWS側だけで完結するのでVMの起動状態は無関係)。毎日のインベントリ収集・trivyスキャンの後に走らせる(デフォルトはJST 09:00)"
   type        = string
-  default     = "cron(0 18 * * ? *)"
+  default     = "cron(0 0 * * ? *)"
 }
 
 variable "maintenance_windows" {
@@ -135,16 +144,16 @@ variable "maintenance_windows" {
   }))
   default = {
     test-weekly = {
-      description = "test: 毎週火曜 02:00。承認0日、自動再起動"
-      schedule    = "cron(0 2 ? * TUE *)"
+      description = "test: 毎週火曜 08:00。承認0日、自動再起動"
+      schedule    = "cron(0 8 ? * TUE *)"
       target_tags = { PatchGroup = ["rhel10-test"] }
       # ゲートは無いが、変更カレンダーのチェックのためAUTOMATION(GatedPatchBaseline、gate未設定)を使う
       task_type     = "AUTOMATION"
       reboot_option = "RebootIfNeeded"
     }
     stg-weekly = {
-      description   = "stg: 毎週水曜 02:00(testの1日後)。承認1日、testの成功が前提、自動再起動"
-      schedule      = "cron(0 2 ? * WED *)"
+      description   = "stg: 毎週水曜 08:00(testの1日後)。承認1日、testの成功が前提、自動再起動"
+      schedule      = "cron(0 8 ? * WED *)"
       target_tags   = { PatchGroup = ["rhel10-stg"] }
       task_type     = "AUTOMATION"
       reboot_option = "RebootIfNeeded"
@@ -155,8 +164,8 @@ variable "maintenance_windows" {
       }
     }
     prod-weekly = {
-      description   = "prod: 毎週金曜 02:00(stgの2日後)。承認2日、stgの成功が前提、再起動は手動"
-      schedule      = "cron(0 2 ? * FRI *)"
+      description   = "prod: 毎週金曜 08:00(stgの2日後)。承認2日、stgの成功が前提、再起動は手動"
+      schedule      = "cron(0 8 ? * FRI *)"
       target_tags   = { PatchGroup = ["rhel10-prod"] }
       task_type     = "AUTOMATION"
       reboot_option = "NoReboot"
@@ -168,16 +177,16 @@ variable "maintenance_windows" {
     }
     # Windows(Patch Tuesday起点の月次サイクル。RHELの週次とは別系統)
     test-monthly-win = {
-      description = "Windows test: 第3火曜 02:00(Patch Tuesday=第2火曜の1週間後)。承認0日、自動再起動"
-      schedule    = "cron(0 2 ? * TUE#3 *)"
+      description = "Windows test: 第3火曜 08:00(Patch Tuesday=第2火曜の1週間後)。承認0日、自動再起動"
+      schedule    = "cron(0 8 ? * TUE#3 *)"
       target_tags = { PatchGroup = ["win2025-test"] }
       # ゲートは無いが、変更カレンダーのチェックのためAUTOMATION(GatedPatchBaseline、gate未設定)を使う
       task_type     = "AUTOMATION"
       reboot_option = "RebootIfNeeded"
     }
     stg-monthly-win = {
-      description   = "Windows stg: 第4火曜 02:00(testの1週間後)。承認1日、testの成功が前提、自動再起動"
-      schedule      = "cron(0 2 ? * TUE#4 *)"
+      description   = "Windows stg: 第4火曜 08:00(testの1週間後)。承認1日、testの成功が前提、自動再起動"
+      schedule      = "cron(0 8 ? * TUE#4 *)"
       target_tags   = { PatchGroup = ["win2025-stg"] }
       task_type     = "AUTOMATION"
       reboot_option = "RebootIfNeeded"
@@ -188,8 +197,8 @@ variable "maintenance_windows" {
       }
     }
     prod-monthly-win = {
-      description   = "Windows prod: 翌月第1火曜 02:00。承認2日、stgの成功が前提、再起動は手動"
-      schedule      = "cron(0 2 ? * TUE#1 *)"
+      description   = "Windows prod: 翌月第1火曜 08:00。承認2日、stgの成功が前提、再起動は手動"
+      schedule      = "cron(0 8 ? * TUE#1 *)"
       target_tags   = { PatchGroup = ["win2025-prod"] }
       task_type     = "AUTOMATION"
       reboot_option = "NoReboot"
